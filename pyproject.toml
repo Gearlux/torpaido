@@ -1,0 +1,32 @@
+[project]
+name = "torpedo"
+version = "0.1.0"
+description = "High-performance compilation and optimization engine for the Modular Quartet."
+authors = [{ name = "Gearlux", email = "info@gearlux.ai" }]
+dependencies = [
+    "confluid",
+    "logflow",
+    "dataflux",
+    "torch",
+    "numpy",
+    "typing-extensions",
+]
+
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["torpedo*"]
+
+[tool.black]
+line-length = 120
+
+[tool.isort]
+profile = "black"
+line_length = 120
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
