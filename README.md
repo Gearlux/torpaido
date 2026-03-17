@@ -12,6 +12,21 @@ Part of the **Modular Quintet**: `LogFlow`, `Confluid`, `Liquify`, `DataFlux`, a
 -   **Unpacked Handover:** Eliminates boxing/unboxing overhead in the compiled computational path.
 -   **Confluid Integration:** Fully configurable via YAML manifests for 100% reproducible deployments.
 
+## 🎯 Design Goals & Requirements
+
+### Compilation Engine
+- **Passive Inference Pruning:** Implement reverse-dependency analysis to strip non-inference sidecars (e.g. testing metadata) from binaries.
+- **Metadata Promotion:** Convert required dynamic metadata into graph inputs and static metadata into constants.
+- **Unpacked Handover:** Replace boxed Python samples with direct tensor-to-tensor edges in the compiled graph.
+
+### Portability
+- **Pluggable Backends:** Support TorchScript, ONNX, and TensorRT via a unified `Backend` protocol.
+- **Fusion:** Enable the fusion of an entire DataFlux pipeline and Torch model into a single deployment artifact.
+
+### Precision
+- **Numeric Parity:** Ensure compiled outputs match the floating-point results of the source Python implementation.
+- **Symmetry:** Compiled artifacts must be verifiable against their source Confluid manifests.
+
 ## 🛠 Usage (Preview)
 
 ```python
@@ -31,7 +46,7 @@ forge.save("production_model.onnx")
 ## 🔧 Installation
 
 ```bash
-pip install torpedo
+pip install git+https://github.com/Gearlux/torpedo.git@main
 ```
 
 ## 📄 License
