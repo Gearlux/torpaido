@@ -2,12 +2,12 @@ pipeline {
     agent {
         node {
             label 'built-in'
-            customWorkspace "${WORKSPACE_ROOT}/torpedo"
+            customWorkspace "${env.WORKSPACE_ROOT}/torpedo"
         }
     }
 
     environment {
-        VENV_PATH = "${WORKSPACE_ROOT}/.venv"
+        VENV_PATH = "${env.WORKSPACE_ROOT}/.venv"
         VENV_BIN = "${VENV_PATH}/bin"
         FORCE_JAVASCRIPT_ACTIONS_TO_NODE24 = 'true'
     }
