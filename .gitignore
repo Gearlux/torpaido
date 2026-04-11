@@ -24,6 +24,7 @@ build/
 .mypy_cache/
 .coverage
 htmlcov/
+coverage-*
 
 # Project-Specific (Data & Logs)
 data/
@@ -40,6 +41,4 @@ flake8.txt
 mypy.txt
 coverage.xml
 test-report.xml
-coverage-sources.zip
 coverage/
-coverage-navigaitor/
