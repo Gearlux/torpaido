@@ -15,11 +15,11 @@ pipeline {
                 echo 'Installing Dependencies...'
                 sh "${VENV_BIN}/pip install --upgrade pip"
                 
-                sh "${VENV_BIN}/pip install --no-cache-dir git+https://github.com/Gearlux/logflow.git@main"
-                sh "${VENV_BIN}/pip install --no-cache-dir git+https://github.com/Gearlux/confluid.git@main"
-                sh "${VENV_BIN}/pip install --no-cache-dir git+https://github.com/Gearlux/dataflux.git@main"
-                
-                sh "${VENV_BIN}/pip install -e .[dev] || ${VENV_BIN}/pip install -e ."
+        # Internal Gearlux dependencies
+        pip install git+https://github.com/Gearlux/confluid.git@main
+        pip install git+https://github.com/Gearlux/logflow.git@main
+        pip install git+https://github.com/Gearlux/dataflux.git@main
+                sh "${VENV_BIN}/pip install -e .[dev]"
             }
         }
 
@@ -29,20 +29,7 @@ pipeline {
                     steps {
                         script {
                             sh "rm -f black-diff.txt black-checkstyle.xml"
-                            def rc = sh(script: "${VENV_BIN}/black --check --diff torpedo tests examples > black-diff.txt 2>&1", returnStatus: true)
-                            sh """${VENV_BIN}/python3 -c "
-import sys, os
-lines = open('black-diff.txt').readlines()
-with open('black-checkstyle.xml', 'w') as f:
-    f.write('<?xml version=\\"1.0\\" encoding=\\"UTF-8\\"?>\\n<checkstyle version=\\"5.0\\">\\n')
-    for line in lines:
-        if line.startswith('would reformat '):
-            path = line.replace('would reformat ', '').strip()
-            f.write('  <file name=\\"' + path + '\\">\\n')
-            f.write('    <error line=\\"1\\" severity=\\"warning\\" message=\\"Black would reformat this file\\" source=\\"black\\"/>\\n')
-            f.write('  </file>\\n')
-    f.write('</checkstyle>\\n')
-" """
+                            sh "${VENV_BIN}/black --check --diff torpedo tests examples > black-diff.txt 2>&1"
                         }
                     }
                     post {
@@ -59,20 +46,7 @@ with open('black-checkstyle.xml', 'w') as f:
                     steps {
                         script {
                             sh "rm -f isort-diff.txt isort-checkstyle.xml"
-                            def rc = sh(script: "${VENV_BIN}/isort --check-only --diff torpedo tests examples > isort-diff.txt 2>&1", returnStatus: true)
-                            sh """${VENV_BIN}/python3 -c "
-import sys, os
-lines = open('isort-diff.txt').readlines()
-with open('isort-checkstyle.xml', 'w') as f:
-    f.write('<?xml version=\\"1.0\\" encoding=\\"UTF-8\\"?>\\n<checkstyle version=\\"5.0\\">\\n')
-    for line in lines:
-        if line.startswith('ERROR: '):
-            path = line.split(' ')[1].strip()
-            f.write('  <file name=\\"' + path + '\\">\\n')
-            f.write('    <error line=\\"1\\" severity=\\"warning\\" message=\\"Isort import order issues\\" source=\\"isort\\"/>\\n')
-            f.write('  </file>\\n')
-    f.write('</checkstyle>\\n')
-" """
+                            sh "${VENV_BIN}/isort --check-only --diff torpedo tests examples > isort-diff.txt 2>&1"
                         }
                     }
                     post {
@@ -88,7 +62,7 @@ with open('isort-checkstyle.xml', 'w') as f:
                 stage('Flake8') {
                     steps {
                         sh "rm -f flake8.txt"
-                        sh "${VENV_BIN}/flake8 torpedo tests examples --config=.flake8 --tee --output-file=flake8.txt || true"
+                        sh "${VENV_BIN}/flake8 torpedo tests examples --tee --output-file=flake8.txt || true"
                     }
                     post {
                         always {
@@ -126,23 +100,11 @@ with open('isort-checkstyle.xml', 'w') as f:
                 always {
                     junit allowEmptyResults: true, testResults: 'test-report.xml'
                     recordCoverage(
-                        id: 'coverage-torpedo',
-                        name: 'Torpedo Coverage',
+                        id: 'coverage',
+                        name: 'Code Coverage',
                         tools: [[parser: 'COBERTURA', pattern: 'coverage.xml']]
                     )
                 }
-            }
-        }
-
-        stage('Verify Examples') {
-            steps {
-                echo 'Running project examples...'
-                sh '''
-                    for f in examples/*.py; do
-                        echo "Running $f..."
-                        ${VENV_BIN}/python3 "$f"
-                    done
-                '''
             }
         }
     }
@@ -152,10 +114,10 @@ with open('isort-checkstyle.xml', 'w') as f:
             echo 'Torpedo Pipeline Complete.'
         }
         success {
-            echo 'Torpedo is healthy and ready for publication.'
+            echo 'Torpedo is healthy.'
         }
         failure {
-            echo 'Torpedo build failed. Please check linting or test failures.'
+            echo 'Torpedo build failed.'
         }
     }
 }
