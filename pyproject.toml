@@ -32,6 +32,9 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 include = ["torpedo*"]
 
+[tool.setuptools.package-data]
+torpedo = ["py.typed"]
+
 [tool.black]
 line-length = 120
 
