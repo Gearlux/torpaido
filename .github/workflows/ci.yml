@@ -1,0 +1,99 @@
+name: Torpedo CI
+
+on:
+  push:
+    branches: [ main, dev/main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  quality-gates:
+    name: Quality Gates
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+        cache: 'pip'
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        
+        # Internal Gearlux dependencies
+        pip install --no-deps git+https://github.com/Gearlux/confluid.git@main
+        pip install --no-deps git+https://github.com/Gearlux/logflow.git@main
+        pip install --no-deps git+https://github.com/Gearlux/dataflux.git@main
+        pip install -e ".[dev]"
+    - name: Run Isort
+      run: isort --check-only .
+    - name: Run Black
+      run: black --check .
+    - name: Run Flake8
+      run: flake8 .
+    - name: Run Mypy
+      run: mypy .
+
+  unit-tests:
+    name: Unit Tests & Coverage
+    needs: [quality-gates]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+        cache: 'pip'
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        
+        # Internal Gearlux dependencies
+        pip install --no-deps git+https://github.com/Gearlux/confluid.git@main
+        pip install --no-deps git+https://github.com/Gearlux/logflow.git@main
+        pip install --no-deps git+https://github.com/Gearlux/dataflux.git@main
+        pip install -e ".[dev]"
+    - name: Run Tests
+      run: |
+        if [ -d tests ] && find tests -name '*.py' | grep -q .; then
+          pytest tests --junitxml=test-report.xml --cov=torpedo --cov-report=xml --cov-report=term
+        else
+          echo "No tests found. Skipping."
+        fi
+    - name: Upload Test Results
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results
+        path: test-report.xml
+      if: always()
+
+  verify-examples:
+    name: Verify Examples
+    needs: [unit-tests]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+        cache: 'pip'
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        
+        # Internal Gearlux dependencies
+        pip install --no-deps git+https://github.com/Gearlux/confluid.git@main
+        pip install --no-deps git+https://github.com/Gearlux/logflow.git@main
+        pip install --no-deps git+https://github.com/Gearlux/dataflux.git@main
+        pip install -e ".[dev]"
+    - name: Run Examples
+      run: |
+        for f in examples/*.py; do
+          if [ -f "$f" ]; then
+            echo "Verifying $f..."
+            python3 "$f"
+          fi
+        done

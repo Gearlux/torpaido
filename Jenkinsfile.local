@@ -1,8 +1,13 @@
 pipeline {
-    agent any
+    agent {
+        node {
+            label 'built-in'
+            customWorkspace "${env.WORKSPACE_ROOT}/torpedo"
+        }
+    }
 
     environment {
-        VENV_PATH = "${WORKSPACE}/.venv"
+        VENV_PATH = "${env.WORKSPACE_ROOT}/.venv"
         VENV_BIN = "${VENV_PATH}/bin"
         FORCE_JAVASCRIPT_ACTIONS_TO_NODE24 = 'true'
     }
@@ -10,15 +15,14 @@ pipeline {
     stages {
         stage('Initialize') {
             steps {
-                echo 'Creating Isolated Virtual Environment...'
-                sh "python3 -m venv ${VENV_PATH}"
-                echo 'Installing Dependencies...'
-                sh "${VENV_BIN}/pip install --upgrade pip"
+                echo 'Validating Environment...'
+                sh "${VENV_BIN}/python3 --version"
+                echo 'Installing Project in Editable Mode...'
                 
-                // Internal Gearlux dependencies
-                sh "${VENV_BIN}/pip install --no-deps git+https://github.com/Gearlux/confluid.git@main"
-                sh "${VENV_BIN}/pip install --no-deps git+https://github.com/Gearlux/logflow.git@main"
-                sh "${VENV_BIN}/pip install --no-deps git+https://github.com/Gearlux/dataflux.git@main"
+                // Internal Gearlux dependencies (local editable)
+                sh "${VENV_BIN}/pip install -e ${env.WORKSPACE_ROOT}/confluid"
+                sh "${VENV_BIN}/pip install -e ${env.WORKSPACE_ROOT}/logflow"
+                sh "${VENV_BIN}/pip install -e ${env.WORKSPACE_ROOT}/dataflux"
                 sh "${VENV_BIN}/pip install -e .[dev]"
             }
         }
