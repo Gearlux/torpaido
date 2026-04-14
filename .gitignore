@@ -24,6 +24,7 @@ build/
 .mypy_cache/
 .coverage
 htmlcov/
+coverage-*
 
 # Project-Specific (Data & Logs)
 data/
@@ -32,3 +33,12 @@ models/*.pt
 models/*.onnx
 *.h5
 *.zarr
+
+# Reports
+*-checkstyle.xml
+*-diff.txt
+flake8.txt
+mypy.txt
+coverage.xml
+test-report.xml
+coverage/

@@ -14,10 +14,12 @@ pipeline {
                 sh "python3 -m venv ${VENV_PATH}"
                 echo 'Installing Dependencies...'
                 sh "${VENV_BIN}/pip install --upgrade pip"
-                sh "${VENV_BIN}/pip install --no-cache-dir git+https://github.com/Gearlux/confluid.git@main"
-                sh "${VENV_BIN}/pip install --no-cache-dir git+https://github.com/Gearlux/logflow.git@main"
-                sh "${VENV_BIN}/pip install --no-cache-dir git+https://github.com/Gearlux/dataflux.git@main"
-                sh "${VENV_BIN}/pip install -e .[dev] || ${VENV_BIN}/pip install -e ."
+                
+                // Internal Gearlux dependencies
+                sh "${VENV_BIN}/pip install --no-deps git+https://github.com/Gearlux/confluid.git@main"
+                sh "${VENV_BIN}/pip install --no-deps git+https://github.com/Gearlux/logflow.git@main"
+                sh "${VENV_BIN}/pip install --no-deps git+https://github.com/Gearlux/dataflux.git@main"
+                sh "${VENV_BIN}/pip install -e .[dev]"
             }
         }
 
@@ -26,86 +28,132 @@ pipeline {
                 stage('Black') {
                     steps {
                         script {
-                            def rc = sh(script: "${VENV_BIN}/black --check --diff torpedo tests examples > black-diff.txt 2>&1", returnStatus: true)
-                            sh """${VENV_BIN}/python3 -c "
+                            sh "rm -f black-diff.txt black-checkstyle.xml"
+                            def targets = sh(script: "for d in torpedo tests examples; do if [ -d \"\$d\" ] && find \"\$d\" -name '*.py' | grep -q .; then printf \"%s \" \"\$d\"; fi; done || true", returnStdout: true).trim()
+                            if (targets) {
+                                def rc = sh(script: "${VENV_BIN}/black --check --diff ${targets} > black-diff.txt 2>&1", returnStatus: true)
+                                sh """${VENV_BIN}/python3 -c "
 import sys, os
+if not os.path.exists('black-diff.txt'): sys.exit(0)
 lines = open('black-diff.txt').readlines()
 with open('black-checkstyle.xml', 'w') as f:
-    f.write('<?xml version=\"1.0\" encoding=\"UTF-8\"?>\\n<checkstyle version=\"5.0\">\\n')
+    f.write('<?xml version=\\"1.0\\" encoding=\\"UTF-8\\"?>\\n<checkstyle version=\\"5.0\\">\\n')
     for line in lines:
         if line.startswith('would reformat '):
             path = line.replace('would reformat ', '').strip()
-            f.write('  <file name=\"' + path + '\">\\n')
-            f.write('    <error line=\"1\" severity=\"warning\" message=\"Black would reformat this file\" source=\"black\"/>\\n')
+            f.write('  <file name=\\"' + path + '\\">\\n')
+            f.write('    <error line=\\"1\\" severity=\\"warning\\" message=\\"Black would reformat this file\\" source=\\"black\\"/>\\n')
             f.write('  </file>\\n')
     f.write('</checkstyle>\\n')
 " """
+                            } else {
+                                echo "No python files found for Black. Skipping."
+                            }
                         }
                     }
                     post {
                         always {
-                            recordIssues(
-                                id: 'black-torpedo',
-                                name: 'Black Formatting (Torpedo)',
-                                tools: [checkStyle(pattern: 'black-checkstyle.xml')]
-                            )
+                            script {
+                                if (fileExists('black-checkstyle.xml')) {
+                                    recordIssues(
+                                        id: 'black-torpedo',
+                                        name: 'Black Formatting (Torpedo)',
+                                        tools: [checkStyle(pattern: 'black-checkstyle.xml')]
+                                    )
+                                }
+                            }
                         }
                     }
                 }
                 stage('Isort') {
                     steps {
                         script {
-                            def rc = sh(script: "${VENV_BIN}/isort --check-only --diff torpedo tests examples > isort-diff.txt 2>&1", returnStatus: true)
-                            sh """${VENV_BIN}/python3 -c "
+                            sh "rm -f isort-diff.txt isort-checkstyle.xml"
+                            def targets = sh(script: "for d in torpedo tests examples; do if [ -d \"\$d\" ] && find \"\$d\" -name '*.py' | grep -q .; then printf \"%s \" \"\$d\"; fi; done || true", returnStdout: true).trim()
+                            if (targets) {
+                                def rc = sh(script: "${VENV_BIN}/isort --check-only --diff ${targets} > isort-diff.txt 2>&1", returnStatus: true)
+                                sh """${VENV_BIN}/python3 -c "
 import sys, os
+if not os.path.exists('isort-diff.txt'): sys.exit(0)
 lines = open('isort-diff.txt').readlines()
 with open('isort-checkstyle.xml', 'w') as f:
-    f.write('<?xml version=\"1.0\" encoding=\"UTF-8\"?>\\n<checkstyle version=\"5.0\">\\n')
+    f.write('<?xml version=\\"1.0\\" encoding=\\"UTF-8\\"?>\\n<checkstyle version=\\"5.0\\">\\n')
     for line in lines:
         if line.startswith('ERROR: '):
             path = line.split(' ')[1].strip()
-            f.write('  <file name=\"' + path + '\">\\n')
-            f.write('    <error line=\"1\" severity=\"warning\" message=\"Isort import order issues\" source=\"isort\"/>\\n')
+            f.write('  <file name=\\"' + path + '\\">\\n')
+            f.write('    <error line=\\"1\\" severity=\\"warning\\" message=\\"Isort import order issues\\" source=\\"isort\\"/>\\n')
             f.write('  </file>\\n')
     f.write('</checkstyle>\\n')
 " """
+                            } else {
+                                echo "No python files found for Isort. Skipping."
+                            }
                         }
                     }
                     post {
                         always {
-                            recordIssues(
-                                id: 'isort-torpedo',
-                                name: 'Isort Import Order (Torpedo)',
-                                tools: [checkStyle(pattern: 'isort-checkstyle.xml')]
-                            )
+                            script {
+                                if (fileExists('isort-checkstyle.xml')) {
+                                    recordIssues(
+                                        id: 'isort-torpedo',
+                                        name: 'Isort Import Order (Torpedo)',
+                                        tools: [checkStyle(pattern: 'isort-checkstyle.xml')]
+                                    )
+                                }
+                            }
                         }
                     }
                 }
                 stage('Flake8') {
                     steps {
-                        sh "${VENV_BIN}/flake8 torpedo tests examples --tee --output-file=flake8.txt || true"
+                        script {
+                            sh "rm -f flake8.txt"
+                            def targets = sh(script: "for d in torpedo tests examples; do if [ -d \"\$d\" ] && find \"\$d\" -name '*.py' | grep -q .; then printf \"%s \" \"\$d\"; fi; done || true", returnStdout: true).trim()
+                            if (targets) {
+                                sh "${VENV_BIN}/flake8 ${targets} --tee --output-file=flake8.txt || true"
+                            } else {
+                                echo "No python files found for Flake8. Skipping."
+                            }
+                        }
                     }
                     post {
                         always {
-                            recordIssues(
-                                id: 'flake8-torpedo',
-                                name: 'Flake8 (Torpedo)',
-                                tools: [flake8(pattern: 'flake8.txt')]
-                            )
+                            script {
+                                if (fileExists('flake8.txt') && readFile('flake8.txt').trim()) {
+                                    recordIssues(
+                                        id: 'flake8-torpedo',
+                                        name: 'Flake8 (Torpedo)',
+                                        tools: [flake8(pattern: 'flake8.txt')]
+                                    )
+                                }
+                            }
                         }
                     }
                 }
                 stage('Mypy') {
                     steps {
-                        sh "${VENV_BIN}/mypy torpedo tests examples > mypy.txt || true"
+                        script {
+                            sh "rm -f mypy.txt"
+                            def targets = sh(script: "for d in torpedo tests examples; do if [ -d \"\$d\" ] && find \"\$d\" -name '*.py' | grep -q .; then printf \"%s \" \"\$d\"; fi; done || true", returnStdout: true).trim()
+                            if (targets) {
+                                sh "${VENV_BIN}/mypy ${targets} > mypy.txt || true"
+                            } else {
+                                echo "No python files found for Mypy. Skipping."
+                            }
+                        }
                     }
                     post {
                         always {
-                            recordIssues(
-                                id: 'mypy-torpedo',
-                                name: 'Mypy (Torpedo)',
-                                tools: [myPy(pattern: 'mypy.txt')]
-                            )
+                            script {
+                                if (fileExists('mypy.txt') && readFile('mypy.txt').trim()) {
+                                    recordIssues(
+                                        id: 'mypy-torpedo',
+                                        name: 'Mypy (Torpedo)',
+                                        tools: [myPy(pattern: 'mypy.txt')]
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -114,17 +162,43 @@ with open('isort-checkstyle.xml', 'w') as f:
 
         stage('Unit Tests') {
             steps {
-                sh "${VENV_BIN}/pytest tests --junitxml=test-report.xml --cov=torpedo --cov-report=xml:coverage.xml --cov-report=term || true"
+                script {
+                    if (fileExists('tests') && sh(script: "find tests -name '*.py' | grep -q .", returnStatus: true) == 0) {
+                        sh "${VENV_BIN}/pytest tests --junitxml=test-report.xml --cov=torpedo --cov-report=xml:coverage.xml --cov-report=term"
+                    } else {
+                        echo "No tests found in 'tests' directory. Skipping."
+                    }
+                }
             }
             post {
                 always {
-                    junit allowEmptyResults: true, testResults: 'test-report.xml'
-                    recordCoverage(
-                        id: 'coverage-torpedo',
-                        name: 'Torpedo Coverage',
-                        tools: [[parser: 'COBERTURA', pattern: 'coverage.xml']]
-                    )
+                    script {
+                        if (fileExists('test-report.xml')) {
+                            junit allowEmptyResults: true, testResults: 'test-report.xml'
+                        }
+                        if (fileExists('coverage.xml')) {
+                            recordCoverage(
+                                id: 'coverage-torpedo',
+                                name: 'Torpedo Coverage',
+                                tools: [[parser: 'COBERTURA', pattern: 'coverage.xml']]
+                            )
+                        }
+                    }
                 }
+            }
+        }
+
+        stage('Verify Examples') {
+            steps {
+                echo 'Running project examples...'
+                sh '''
+                    for f in examples/*.py; do
+                        if [ -f "$f" ]; then
+                            echo "Verifying $f..."
+                            ${VENV_BIN}/python3 "$f"
+                        fi
+                    done
+                '''
             }
         }
     }
@@ -132,6 +206,12 @@ with open('isort-checkstyle.xml', 'w') as f:
     post {
         always {
             echo 'Torpedo Pipeline Complete.'
+        }
+        success {
+            echo 'Torpedo is healthy.'
+        }
+        failure {
+            echo 'Torpedo build failed. Please check linting or test failures.'
         }
     }
 }
