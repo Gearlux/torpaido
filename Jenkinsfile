@@ -111,7 +111,7 @@ with open('isort-checkstyle.xml', 'w') as f:
                             sh "rm -f flake8.txt"
                             def targets = sh(script: "for d in torpedo tests examples; do if [ -d \"\$d\" ] && find \"\$d\" -name '*.py' | grep -q .; then printf \"%s \" \"\$d\"; fi; done || true", returnStdout: true).trim()
                             if (targets) {
-                                sh "${VENV_BIN}/flake8 ${targets} --tee --output-file=flake8.txt || true"
+                                sh "${VENV_BIN}/flake8 ${targets} --tee --output-file=flake8.txt"
                             } else {
                                 echo "No python files found for Flake8. Skipping."
                             }
@@ -135,12 +135,7 @@ with open('isort-checkstyle.xml', 'w') as f:
                     steps {
                         script {
                             sh "rm -f mypy.txt"
-                            def targets = sh(script: "for d in torpedo tests examples; do if [ -d \"\$d\" ] && find \"\$d\" -name '*.py' | grep -q .; then printf \"%s \" \"\$d\"; fi; done || true", returnStdout: true).trim()
-                            if (targets) {
-                                sh "${VENV_BIN}/mypy ${targets} > mypy.txt || true"
-                            } else {
-                                echo "No python files found for Mypy. Skipping."
-                            }
+                            sh "${VENV_BIN}/mypy . > mypy.txt"
                         }
                     }
                     post {
