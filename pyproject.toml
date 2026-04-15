@@ -2,7 +2,7 @@
 name = "torpedo"
 version = "0.1.0"
 description = "High-performance compilation and optimization engine for the Modular Quartet."
-authors = [{ name = "Gearlux", email = "info@gearlux.ai" }]
+authors = [{ name = "Taidal", email = "info@gearlux.ai" }]
 dependencies = [
     "confluid",
     "logflow",

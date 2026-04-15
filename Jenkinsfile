@@ -12,14 +12,15 @@ pipeline {
             steps {
                 echo 'Creating Isolated Virtual Environment...'
                 sh "python3 -m venv ${VENV_PATH}"
+                echo 'Bootstrapping uv for fast dependency resolution...'
+                sh "${VENV_BIN}/pip install --upgrade pip uv"
                 echo 'Installing Dependencies...'
-                sh "${VENV_BIN}/pip install --upgrade pip"
                 
                 // Internal Gearlux dependencies
-                sh "${VENV_BIN}/pip install --no-deps git+https://github.com/Gearlux/confluid.git@main"
-                sh "${VENV_BIN}/pip install --no-deps git+https://github.com/Gearlux/logflow.git@main"
-                sh "${VENV_BIN}/pip install --no-deps git+https://github.com/Gearlux/dataflux.git@main"
-                sh "${VENV_BIN}/pip install -e .[dev]"
+                sh "${VENV_BIN}/uv pip install --no-deps git+https://github.com/Gearlux/confluid.git@main"
+                sh "${VENV_BIN}/uv pip install --no-deps git+https://github.com/Gearlux/logflow.git@main"
+                sh "${VENV_BIN}/uv pip install --no-deps git+https://github.com/Gearlux/dataflux.git@main"
+                sh "${VENV_BIN}/uv pip install -e .[dev]"
             }
         }
 
