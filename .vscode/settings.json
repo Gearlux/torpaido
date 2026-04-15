@@ -8,5 +8,18 @@
             "envManager": "ms-python.python:venv",
             "packageManager": "ms-python.python:pip"
         }
+    ],
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}/../logflow",
+        "${workspaceFolder}/../confluid",
+        "${workspaceFolder}/../liquify",
+        "${workspaceFolder}/../dataflux",
+        "${workspaceFolder}/../waivefront",
+        "${workspaceFolder}/../navigaitor",
+        "${workspaceFolder}/../aisland",
+        "${workspaceFolder}/../annotaide",
+        "${workspaceFolder}/../marainer",
+        "${workspaceFolder}/../waivefront-helios",
+        "${workspaceFolder}/../waivefront-rfuav"
     ]
 }

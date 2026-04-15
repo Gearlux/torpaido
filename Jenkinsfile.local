@@ -20,10 +20,10 @@ pipeline {
                 echo 'Installing Project in Editable Mode...'
                 
                 // Internal Gearlux dependencies (local editable)
-                sh "${VENV_BIN}/pip install -e ${env.WORKSPACE_ROOT}/confluid"
-                sh "${VENV_BIN}/pip install -e ${env.WORKSPACE_ROOT}/logflow"
-                sh "${VENV_BIN}/pip install -e ${env.WORKSPACE_ROOT}/dataflux"
-                sh "${VENV_BIN}/pip install -e .[dev]"
+                sh "${VENV_BIN}/uv pip install -e ${env.WORKSPACE_ROOT}/confluid"
+                sh "${VENV_BIN}/uv pip install -e ${env.WORKSPACE_ROOT}/logflow"
+                sh "${VENV_BIN}/uv pip install -e ${env.WORKSPACE_ROOT}/dataflux"
+                sh "${VENV_BIN}/uv pip install -e .[dev]"
             }
         }
 
