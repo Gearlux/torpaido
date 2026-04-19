@@ -35,7 +35,7 @@ pipeline {
                             sh "rm -f black-diff.txt black-checkstyle.xml"
                             def targets = sh(script: "for d in torpedo tests examples; do if [ -d \"\$d\" ] && find \"\$d\" -name '*.py' | grep -q .; then printf \"%s \" \"\$d\"; fi; done || true", returnStdout: true).trim()
                             if (targets) {
-                                def exitCode = sh(script: "${VENV_BIN}/black --check --diff ${targets} > black-diff.txt 2>&1", returnStatus: true)
+                                def exitCode = sh(script: "set -o pipefail; ${VENV_BIN}/black --check --diff ${targets} 2>&1 | tee black-diff.txt", returnStatus: true)
                                 
                                 // Generate checkstyle report
                                 sh """${VENV_BIN}/python3 -c "
@@ -80,7 +80,7 @@ with open('black-checkstyle.xml', 'w') as f:
                             sh "rm -f isort-diff.txt isort-checkstyle.xml"
                             def targets = sh(script: "for d in torpedo tests examples; do if [ -d \"\$d\" ] && find \"\$d\" -name '*.py' | grep -q .; then printf \"%s \" \"\$d\"; fi; done || true", returnStdout: true).trim()
                             if (targets) {
-                                def exitCode = sh(script: "${VENV_BIN}/isort --check-only --diff ${targets} > isort-diff.txt 2>&1", returnStatus: true)
+                                def exitCode = sh(script: "set -o pipefail; ${VENV_BIN}/isort --check-only --diff ${targets} 2>&1 | tee isort-diff.txt", returnStatus: true)
                                 
                                 // Generate checkstyle report
                                 sh """${VENV_BIN}/python3 -c "
@@ -150,7 +150,12 @@ with open('isort-checkstyle.xml', 'w') as f:
                         script {
                             sh "rm -f mypy.txt"
                             // Run from workspace root to ensure root mypy.ini is picked up and imports resolve correctly.
-                            sh "cd ${env.WORKSPACE_ROOT} && ${VENV_BIN}/mypy torpedo > ${env.WORKSPACE_ROOT}/torpedo/mypy.txt"
+                            // tee streams errors to the Jenkins console; pipefail ensures mypy's exit code (not tee's)
+                            // propagates so the stage actually fails visibly when types break.
+                            def exitCode = sh(script: "set -o pipefail; cd ${env.WORKSPACE_ROOT} && ${VENV_BIN}/mypy torpedo 2>&1 | tee ${env.WORKSPACE_ROOT}/torpedo/mypy.txt", returnStatus: true)
+                            if (exitCode != 0) {
+                                error("Mypy found type errors. See console output above and Mypy report.")
+                            }
                         }
                     }
                     post {
