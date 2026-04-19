@@ -29,12 +29,13 @@ pipeline {
                 echo 'Bootstrapping uv for fast dependency resolution...'
                 sh "${VENV_BIN}/pip install --upgrade pip uv"
                 echo 'Installing Dependencies...'
-                
-                // Internal Gearlux dependencies
-                sh "${VENV_BIN}/uv pip install --no-deps git+https://github.com/Gearlux/confluid.git@main"
-                sh "${VENV_BIN}/uv pip install --no-deps git+https://github.com/Gearlux/logflow.git@main"
-                sh "${VENV_BIN}/uv pip install --no-deps git+https://github.com/Gearlux/dataflux.git@main"
                 sh "${VENV_BIN}/uv pip install -e .[dev]"
+                
+                // Internal Gearlux dependencies — installed LAST with --reinstall
+                // so PyPI name collisions from .[dev] resolution get overwritten.
+                sh "${VENV_BIN}/uv pip install --reinstall --no-deps git+https://github.com/Gearlux/confluid.git@main"
+                sh "${VENV_BIN}/uv pip install --reinstall --no-deps git+https://github.com/Gearlux/logflow.git@main"
+                sh "${VENV_BIN}/uv pip install --reinstall --no-deps git+https://github.com/Gearlux/dataflux.git@main"
             }
         }
 
@@ -48,7 +49,7 @@ pipeline {
                             def targets = sh(script: "for d in torpedo tests examples; do if [ -d \"\$d\" ] && find \"\$d\" -name '*.py' | grep -q .; then printf \"%s \" \"\$d\"; fi; done || true", returnStdout: true).trim()
                             if (targets) {
                                 def exitCode = sh(script: "set -o pipefail; ${VENV_BIN}/black --check --diff ${targets} 2>&1 | tee black-diff.txt", returnStatus: true)
-                                
+
                                 // Generate checkstyle report
                                 sh """${VENV_BIN}/python3 -c "
 import sys, os
@@ -97,7 +98,7 @@ with open('black-checkstyle.xml', 'w') as f:
                             def targets = sh(script: "for d in torpedo tests examples; do if [ -d \"\$d\" ] && find \"\$d\" -name '*.py' | grep -q .; then printf \"%s \" \"\$d\"; fi; done || true", returnStdout: true).trim()
                             if (targets) {
                                 def exitCode = sh(script: "set -o pipefail; ${VENV_BIN}/isort --check-only --diff ${targets} 2>&1 | tee isort-diff.txt", returnStatus: true)
-                                
+
                                 // Generate checkstyle report
                                 sh """${VENV_BIN}/python3 -c "
 import sys, os
