@@ -26,12 +26,13 @@ jobs:
       uses: astral-sh/setup-uv@v4
     - name: Install dependencies
       run: |
-        
-        # Internal Gearlux dependencies
-        uv pip install --system --no-deps git+https://github.com/Gearlux/confluid.git@main
-        uv pip install --system --no-deps git+https://github.com/Gearlux/logflow.git@main
-        uv pip install --system --no-deps git+https://github.com/Gearlux/dataflux.git@main
         uv pip install --system -e ".[dev]"
+        
+        # Internal Gearlux dependencies — installed LAST with --reinstall so any
+        # PyPI name collisions from `-e .[dev]` resolution get overwritten.
+        uv pip install --system --reinstall --no-deps git+https://github.com/Gearlux/confluid.git@main
+        uv pip install --system --reinstall --no-deps git+https://github.com/Gearlux/logflow.git@main
+        uv pip install --system --reinstall --no-deps git+https://github.com/Gearlux/dataflux.git@main
     - name: Run Isort
       run: isort --check-only .
     - name: Run Black
@@ -55,12 +56,13 @@ jobs:
       uses: astral-sh/setup-uv@v4
     - name: Install dependencies
       run: |
-        
-        # Internal Gearlux dependencies
-        uv pip install --system --no-deps git+https://github.com/Gearlux/confluid.git@main
-        uv pip install --system --no-deps git+https://github.com/Gearlux/logflow.git@main
-        uv pip install --system --no-deps git+https://github.com/Gearlux/dataflux.git@main
         uv pip install --system -e ".[dev]"
+        
+        # Internal Gearlux dependencies — installed LAST with --reinstall so any
+        # PyPI name collisions from `-e .[dev]` resolution get overwritten.
+        uv pip install --system --reinstall --no-deps git+https://github.com/Gearlux/confluid.git@main
+        uv pip install --system --reinstall --no-deps git+https://github.com/Gearlux/logflow.git@main
+        uv pip install --system --reinstall --no-deps git+https://github.com/Gearlux/dataflux.git@main
     - name: Run Tests
       run: |
         if [ -d tests ] && find tests -name '*.py' | grep -q .; then
@@ -89,12 +91,13 @@ jobs:
       uses: astral-sh/setup-uv@v4
     - name: Install dependencies
       run: |
-        
-        # Internal Gearlux dependencies
-        uv pip install --system --no-deps git+https://github.com/Gearlux/confluid.git@main
-        uv pip install --system --no-deps git+https://github.com/Gearlux/logflow.git@main
-        uv pip install --system --no-deps git+https://github.com/Gearlux/dataflux.git@main
         uv pip install --system -e ".[dev]"
+        
+        # Internal Gearlux dependencies — installed LAST with --reinstall so any
+        # PyPI name collisions from `-e .[dev]` resolution get overwritten.
+        uv pip install --system --reinstall --no-deps git+https://github.com/Gearlux/confluid.git@main
+        uv pip install --system --reinstall --no-deps git+https://github.com/Gearlux/logflow.git@main
+        uv pip install --system --reinstall --no-deps git+https://github.com/Gearlux/dataflux.git@main
     - name: Run Examples
       run: |
         for f in examples/*.py; do
