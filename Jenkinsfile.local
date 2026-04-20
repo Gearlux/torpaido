@@ -31,6 +31,12 @@ pipeline {
             steps {
                 echo 'Validating Environment...'
                 sh "${VENV_BIN}/python3 --version"
+                // uv MUST be present in the workspace venv. It is installed by
+                // `aisland setup` (which runs on initial bootstrap) and verified/
+                // repaired on every subsequent call. Jenkins jobs deliberately do NOT
+                // install it here — that responsibility lives with aisland so the
+                // venv stays under a single owner.
+                sh "${VENV_BIN}/uv --version"
                 echo 'Installing Project in Editable Mode...'
                 sh "${VENV_BIN}/uv pip install -e .[dev]"
                 
