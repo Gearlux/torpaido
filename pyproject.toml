@@ -1,12 +1,12 @@
 [project]
-name = "torpedo"
+name = "torpaido"
 version = "0.1.0"
 description = "High-performance compilation and optimization engine for the Modular Quartet."
 authors = [{ name = "Taidal", email = "info@gearlux.ai" }]
 dependencies = [
-    "confluid",
-    "logflow",
-    "dataflux",
+    "confluid>=0.1.0",
+    "log-flow>=0.1.0",
+    "data-flux>=0.1.0",
     "torch",
     "numpy",
     "typing-extensions",
@@ -30,10 +30,10 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["torpedo*"]
+include = ["torpaido*"]
 
 [tool.setuptools.package-data]
-torpedo = ["py.typed"]
+torpaido = ["py.typed"]
 
 [tool.black]
 line-length = 120
