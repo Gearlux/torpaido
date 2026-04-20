@@ -30,7 +30,7 @@ Part of the **Modular Quintet**: `LogFlow`, `Confluid`, `Liquify`, `DataFlux`, a
 ## 🛠 Usage (Preview)
 
 ```python
-from torpedo import Forge
+from torpaido import Forge
 
 # 1. Take a DataFlux pipeline
 pipeline = Flux(source).map(heavy_op).map(model)
@@ -46,7 +46,7 @@ forge.save("production_model.onnx")
 ## 🔧 Installation
 
 ```bash
-pip install git+https://github.com/Gearlux/torpedo.git@main
+pip install git+https://github.com/Gearlux/torpaido.git@main
 ```
 
 ## 📄 License
