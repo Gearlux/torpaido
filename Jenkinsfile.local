@@ -38,14 +38,14 @@ pipeline {
                 // venv stays under a single owner.
                 sh "${VENV_BIN}/uv --version"
                 echo 'Installing Project in Editable Mode...'
-                sh "${VENV_BIN}/uv pip install -e .[dev]"
                 
-                // Internal Gearlux dependencies (local editable) — installed LAST
-                // with --reinstall --no-deps to overwrite any PyPI name collision
-                // WITHOUT re-resolving transitive deps (which would undo the fix).
-                sh "${VENV_BIN}/uv pip install --reinstall --no-deps -e ${env.WORKSPACE_ROOT}/confluid"
-                sh "${VENV_BIN}/uv pip install --reinstall --no-deps -e ${env.WORKSPACE_ROOT}/logflow"
-                sh "${VENV_BIN}/uv pip install --reinstall --no-deps -e ${env.WORKSPACE_ROOT}/dataflux"
+                // Internal Gearlux dependencies — installed FIRST with --no-deps
+                // so .[dev] below finds them pre-satisfied instead of hitting PyPI
+                // (Gearlux distribution names are intentionally unpublished on PyPI).
+                sh "${VENV_BIN}/uv pip install --no-deps -e ${env.WORKSPACE_ROOT}/confluid"
+                sh "${VENV_BIN}/uv pip install --no-deps -e ${env.WORKSPACE_ROOT}/logflow"
+                sh "${VENV_BIN}/uv pip install --no-deps -e ${env.WORKSPACE_ROOT}/dataflux"
+                sh "${VENV_BIN}/uv pip install -e .[dev]"
             }
         }
 
