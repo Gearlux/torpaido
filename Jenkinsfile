@@ -37,6 +37,11 @@ pipeline {
                 sh "${VENV_BIN}/uv pip install --no-deps git+https://github.com/Gearlux/confluid.git@main"
                 sh "${VENV_BIN}/uv pip install --no-deps git+https://github.com/Gearlux/data-flux.git@main"
                 sh "${VENV_BIN}/uv pip install -e .[dev]"
+                // Notebook-only extras (matplotlib, jupyter kernels, etc.) live
+                // in the optional `[notebook]` extra when the project ships
+                // notebooks; absence is not an error.
+                sh "${VENV_BIN}/uv pip install -e .[notebook] 2>/dev/null || echo 'No [notebook] extras declared; continuing with defaults.'"
+                sh "${VENV_BIN}/uv pip install jupyter nbconvert"
             }
         }
 
