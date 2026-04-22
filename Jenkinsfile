@@ -241,6 +241,29 @@ with open('isort-checkstyle.xml', 'w') as f:
                 '''
             }
         }
+
+        stage('Verify Notebooks') {
+            when {
+                expression { return fileExists('notebooks') }
+            }
+            steps {
+                echo 'Executing project notebooks...'
+                sh '''
+                    shopt -s nullglob
+                    nbs=(notebooks/*.ipynb)
+                    if [ ${#nbs[@]} -eq 0 ]; then
+                        echo "No notebooks to verify."
+                        exit 0
+                    fi
+                    for nb in "${nbs[@]}"; do
+                        echo "Executing $nb..."
+                        ${VENV_BIN}/jupyter nbconvert --to notebook --execute \
+                            --output /tmp/$(basename "$nb" .ipynb)-ci.ipynb \
+                            "$nb"
+                    done
+                '''
+            }
+        }
     }
 
     post {
