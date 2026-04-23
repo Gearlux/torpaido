@@ -147,6 +147,6 @@ jobs:
         for nb in "${nbs[@]}"; do
           echo "Executing $nb..."
           jupyter nbconvert --to notebook --execute \
-            --output /tmp/$(basename "$nb" .ipynb)-ci.ipynb \
+            --output "/tmp/$(basename "$nb" .ipynb)-ci.ipynb" \
             "$nb"
         done
