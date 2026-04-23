@@ -273,7 +273,7 @@ with open('isort-checkstyle.xml', 'w') as f:
                     for nb in "${nbs[@]}"; do
                         echo "Executing $nb..."
                         ${VENV_BIN}/jupyter nbconvert --to notebook --execute \
-                            --output /tmp/$(basename "$nb" .ipynb)-ci.ipynb \
+                            --output "/tmp/$(basename "$nb" .ipynb)-ci.ipynb" \
                             "$nb"
                     done
                 '''
