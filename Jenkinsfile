@@ -269,6 +269,22 @@ with open('isort-checkstyle.xml', 'w') as f:
                 '''
             }
         }
+
+        stage('Verify Frontend') {
+            when {
+                expression { return fileExists('frontend/package.json') }
+            }
+            steps {
+                echo 'Installing frontend deps + running tests + production build...'
+                dir('frontend') {
+                    sh '''
+                        npm ci
+                        npm run test --if-present
+                        npm run build --if-present
+                    '''
+                }
+            }
+        }
     }
 
     post {
