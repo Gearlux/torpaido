@@ -264,18 +264,19 @@ with open('isort-checkstyle.xml', 'w') as f:
             steps {
                 echo 'Executing project notebooks...'
                 sh '''
-                    shopt -s nullglob
-                    nbs=(notebooks/*.ipynb)
-                    if [ ${#nbs[@]} -eq 0 ]; then
-                        echo "No notebooks to verify."
-                        exit 0
-                    fi
-                    for nb in "${nbs[@]}"; do
+                    # POSIX-clean: dash (typical /bin/sh on Linux) has no shopt/arrays.
+                    # Loop runs zero times when no .ipynb matches (we check found at the end).
+                    found=0
+                    for nb in notebooks/*.ipynb; do
+                        [ -f "$nb" ] || continue
+                        found=1
                         echo "Executing $nb..."
                         ${VENV_BIN}/jupyter nbconvert --to notebook --execute \
                             --output "/tmp/$(basename "$nb" .ipynb)-ci.ipynb" \
                             "$nb"
                     done
+                    [ "$found" -eq 0 ] && echo "No notebooks to verify."
+                    exit 0
                 '''
             }
         }
