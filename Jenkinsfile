@@ -54,7 +54,7 @@ pipeline {
                             sh "rm -f black-diff.txt black-checkstyle.xml"
                             def targets = sh(script: "for d in torpaido tests examples; do if [ -d \"\$d\" ] && find \"\$d\" -name '*.py' | grep -q .; then printf \"%s \" \"\$d\"; fi; done || true", returnStdout: true).trim()
                             if (targets) {
-                                def exitCode = sh(script: "set -o pipefail; ${VENV_BIN}/black --check --diff ${targets} 2>&1 | tee black-diff.txt", returnStatus: true)
+                                def exitCode = sh(script: "bash -c 'set -o pipefail; ${VENV_BIN}/black --check --diff ${targets} 2>&1 | tee black-diff.txt'", returnStatus: true)
 
                                 // Generate checkstyle report
                                 sh """${VENV_BIN}/python3 -c "
@@ -103,7 +103,7 @@ with open('black-checkstyle.xml', 'w') as f:
                             sh "rm -f isort-diff.txt isort-checkstyle.xml"
                             def targets = sh(script: "for d in torpaido tests examples; do if [ -d \"\$d\" ] && find \"\$d\" -name '*.py' | grep -q .; then printf \"%s \" \"\$d\"; fi; done || true", returnStdout: true).trim()
                             if (targets) {
-                                def exitCode = sh(script: "set -o pipefail; ${VENV_BIN}/isort --check-only --diff ${targets} 2>&1 | tee isort-diff.txt", returnStatus: true)
+                                def exitCode = sh(script: "bash -c 'set -o pipefail; ${VENV_BIN}/isort --check-only --diff ${targets} 2>&1 | tee isort-diff.txt'", returnStatus: true)
 
                                 // Generate checkstyle report
                                 sh """${VENV_BIN}/python3 -c "
@@ -178,7 +178,7 @@ with open('isort-checkstyle.xml', 'w') as f:
                             sh "rm -f mypy.txt"
                             // tee streams errors to the Jenkins console; pipefail ensures mypy's exit code (not tee's)
                             // propagates so the stage fails visibly when types break.
-                            def exitCode = sh(script: "set -o pipefail; ${VENV_BIN}/mypy . 2>&1 | tee mypy.txt", returnStatus: true)
+                            def exitCode = sh(script: "bash -c 'set -o pipefail; ${VENV_BIN}/mypy . 2>&1 | tee mypy.txt'", returnStatus: true)
                             if (exitCode != 0) {
                                 if (params.REPORT_ALL_WARNINGS) {
                                     unstable("Mypy found type errors. See console output above and Mypy report.")
