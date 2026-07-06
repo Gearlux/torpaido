@@ -2,7 +2,7 @@
 
 **Torpedo** is a high-performance compilation and optimization engine designed to transform functional **DataFlux** pipelines and PyTorch models into optimized, production-ready inference artifacts.
 
-Part of the **Modular Quintet**: `LogFlow`, `Confluid`, `Liquify`, `DataFlux`, and `Torpedo`.
+Part of the **Modular Quintet**: `Loggair`, `Confluid`, `Liquify`, `DataFlux`, and `Torpedo`.
 
 ## 🚀 Key Features
 
