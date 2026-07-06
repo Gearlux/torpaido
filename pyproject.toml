@@ -5,7 +5,7 @@ description = "High-performance compilation and optimization engine for the Modu
 authors = [{ name = "Taidal", email = "info@gearlux.ai" }]
 dependencies = [
     "confluid>=0.1.0",
-    "logflow-ml>=0.2.0",
+    "loggair>=0.1.0",
     "data-flux>=0.1.0",
     "torch",
     "numpy",
