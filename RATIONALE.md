@@ -31,5 +31,5 @@ Torpedo is designed as an orchestrator for multiple inference engines:
 ## Design Goals
 - **Research Purity:** Keep the Python code functional and clean.
 - **Production Performance:** Single-command path from Python to optimized C++-ready binary.
-- **Full Traceability:** Integrate with **LogFlow** to monitor the compilation lifecycle.
+- **Full Traceability:** Integrate with **Loggair** to monitor the compilation lifecycle.
 - **Symmetry:** Every compiled artifact must be reconstructible and verifiable against its source manifest.
