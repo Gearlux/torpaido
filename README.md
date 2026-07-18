@@ -1,8 +1,8 @@
 # Torpedo
 
-**Torpedo** is a high-performance compilation and optimization engine designed to transform functional **DataFlux** pipelines and PyTorch models into optimized, production-ready inference artifacts.
+**Torpedo** is a high-performance compilation and optimization engine designed to transform functional **SampleFlux** pipelines and PyTorch models into optimized, production-ready inference artifacts.
 
-Part of the **Modular Quintet**: `Loggair`, `Confluid`, `Liquify`, `DataFlux`, and `Torpedo`.
+Part of the **Modular Quintet**: `Loggair`, `Confluid`, `Liquify`, `SampleFlux`, and `Torpedo`.
 
 ## 🚀 Key Features
 
@@ -21,7 +21,7 @@ Part of the **Modular Quintet**: `Loggair`, `Confluid`, `Liquify`, `DataFlux`, a
 
 ### Portability
 - **Pluggable Backends:** Support TorchScript, ONNX, and TensorRT via a unified `Backend` protocol.
-- **Fusion:** Enable the fusion of an entire DataFlux pipeline and Torch model into a single deployment artifact.
+- **Fusion:** Enable the fusion of an entire SampleFlux pipeline and Torch model into a single deployment artifact.
 
 ### Precision
 - **Numeric Parity:** Ensure compiled outputs match the floating-point results of the source Python implementation.
@@ -32,7 +32,7 @@ Part of the **Modular Quintet**: `Loggair`, `Confluid`, `Liquify`, `DataFlux`, a
 ```python
 from torpaido import Forge
 
-# 1. Take a DataFlux pipeline
+# 1. Take a SampleFlux pipeline
 pipeline = Flux(source).map(heavy_op).map(model)
 
 # 2. Forge it into an optimized binary

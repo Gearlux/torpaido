@@ -1,7 +1,7 @@
 # Torpedo: Rationale & Architectural Design
 
 ## Executive Summary
-**Torpedo** is the high-performance compilation and optimization engine for the Modular Quartet. It transforms functional **DataFlux** pipelines and PyTorch models into optimized, production-ready inference artifacts (TorchScript, ONNX, TensorRT).
+**Torpedo** is the high-performance compilation and optimization engine for the Modular Quartet. It transforms functional **SampleFlux** pipelines and PyTorch models into optimized, production-ready inference artifacts (TorchScript, ONNX, TensorRT).
 
 ---
 
@@ -18,7 +18,7 @@ Torpedo avoids passing heavy Python dictionaries into compiled modules.
 - **Dynamic Promotion:** Required variable metadata (e.g., `samplerate`) is promoted to secondary graph inputs.
 
 ### 3. "Unpacked" Handover Pattern
-At runtime, DataFlux uses "Boxed" immutable samples for safety. Torpedo "unpacks" the box during compilation, creating direct tensor-to-tensor links between nodes. This eliminates the overhead of dictionary lookups and tuple creation in the hot path.
+At runtime, SampleFlux uses "Boxed" immutable samples for safety. Torpedo "unpacks" the box during compilation, creating direct tensor-to-tensor links between nodes. This eliminates the overhead of dictionary lookups and tuple creation in the hot path.
 
 ### 4. Pluggable Backend Architecture
 Torpedo is designed as an orchestrator for multiple inference engines:
