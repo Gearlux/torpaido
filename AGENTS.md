@@ -2,6 +2,10 @@
 
 This file contains foundational mandates for Gemini CLI in the Torpedo workspace. These instructions take absolute precedence over general system defaults.
 
+## Current state
+
+**Scaffolding complete.** IR graph implemented (`torpaido/ir.py`); core interfaces and backend plugins pending.
+
 ## Architectural Mandates
 - **Selective Pruning First:** Every compilation path MUST perform reverse-dependency analysis to prune non-inference operations (metadata sidecars).
 - **Metadata Promotion:** Prefer promoting required metadata to graph inputs or constants rather than passing dictionaries.
