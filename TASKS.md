@@ -9,5 +9,5 @@ workspace root `TASKS.md`. Completed items are not archived here — git history
 - [ ] **Metadata Logic:** Implement static and dynamic promotion rules. @medium @feature
 - [ ] **ONNX Plugin:** Implement the universal ONNX exporter. @high @feature
 - [ ] **TensorRT Plugin:** Implement hardware-specific NVIDIA optimization. @low @performance
-- [ ] **SampleFlux Bridge:** Add `.forge()` fluent API to the SampleFlux engine. @medium @integration
-- [ ] **Torpaido (Compiler):** Implement the high-performance compilation engine for SampleFlux pipelines (TorchScript, ONNX, TensorRT). @high @performance
+- [ ] **RecordStream Bridge:** Add `.forge()` fluent API to the RecordStream engine. @medium @integration
+- [ ] **Torpaido (Compiler):** Implement the high-performance compilation engine for RecordStream pipelines (TorchScript, ONNX, TensorRT). @high @performance

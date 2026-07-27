@@ -6,7 +6,7 @@ authors = [{ name = "Taidal", email = "info@gearlux.ai" }]
 dependencies = [
     "confluid>=0.1.0",
     "loggair>=0.1.0",
-    "sampleflux>=0.1.0",
+    "recordstream>=0.1.0",
     "torch",
     "numpy",
     "typing-extensions",

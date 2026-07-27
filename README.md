@@ -1,8 +1,8 @@
 # Torpedo
 
-**Torpedo** is a high-performance compilation and optimization engine designed to transform functional **SampleFlux** pipelines and PyTorch models into optimized, production-ready inference artifacts.
+**Torpedo** is a high-performance compilation and optimization engine designed to transform functional **RecordStream** pipelines and PyTorch models into optimized, production-ready inference artifacts.
 
-Part of the **Modular Quintet**: `Loggair`, `Confluid`, `Liquify`, `SampleFlux`, and `Torpedo`.
+Part of the **Modular Quintet**: `Loggair`, `Confluid`, `Liquify`, `RecordStream`, and `Torpedo`.
 
 ## 🚀 Key Features
 
@@ -17,11 +17,11 @@ Part of the **Modular Quintet**: `Loggair`, `Confluid`, `Liquify`, `SampleFlux`,
 ### Compilation Engine
 - **Passive Inference Pruning:** Implement reverse-dependency analysis to strip non-inference sidecars (e.g. testing metadata) from binaries.
 - **Metadata Promotion:** Convert required dynamic metadata into graph inputs and static metadata into constants.
-- **Unpacked Handover:** Replace boxed Python samples with direct tensor-to-tensor edges in the compiled graph.
+- **Unpacked Handover:** Replace boxed Python records with direct tensor-to-tensor edges in the compiled graph.
 
 ### Portability
 - **Pluggable Backends:** Support TorchScript, ONNX, and TensorRT via a unified `Backend` protocol.
-- **Fusion:** Enable the fusion of an entire SampleFlux pipeline and Torch model into a single deployment artifact.
+- **Fusion:** Enable the fusion of an entire RecordStream pipeline and Torch model into a single deployment artifact.
 
 ### Precision
 - **Numeric Parity:** Ensure compiled outputs match the floating-point results of the source Python implementation.
@@ -32,8 +32,8 @@ Part of the **Modular Quintet**: `Loggair`, `Confluid`, `Liquify`, `SampleFlux`,
 ```python
 from torpaido import Forge
 
-# 1. Take a SampleFlux pipeline
-pipeline = Flux(source).map(heavy_op).map(model)
+# 1. Take a RecordStream pipeline
+pipeline = Stream(source).map(heavy_op).map(model)
 
 # 2. Forge it into an optimized binary
 forge = Forge(pipeline, backend="onnx")
