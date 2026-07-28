@@ -42,9 +42,8 @@ pipeline {
                 // Internal Gearlux dependencies — installed FIRST with --no-deps
                 // so .[dev] below finds them pre-satisfied instead of hitting PyPI
                 // (Gearlux distribution names are intentionally unpublished on PyPI).
-                sh "${VENV_BIN}/uv pip install --no-deps -e ${env.WORKSPACE_ROOT}/loggair"
-                sh "${VENV_BIN}/uv pip install --no-deps -e ${env.WORKSPACE_ROOT}/confluid"
-                sh "${VENV_BIN}/uv pip install --no-deps -e ${env.WORKSPACE_ROOT}/recordstream"
+                sh "if [ -d '${env.WORKSPACE_ROOT}/liquifai' ]; then ${VENV_BIN}/uv pip install --no-deps -e '${env.WORKSPACE_ROOT}/liquifai'; else ${VENV_BIN}/uv pip install --no-deps git+https://github.com/Gearlux/liquifai.git@main; fi"
+                sh "if [ -d '${env.WORKSPACE_ROOT}/recordstream' ]; then ${VENV_BIN}/uv pip install --no-deps -e '${env.WORKSPACE_ROOT}/recordstream'; else ${VENV_BIN}/uv pip install --no-deps git+https://github.com/Gearlux/recordstream.git@main; fi"
                 sh "${VENV_BIN}/uv pip install -e .[dev]"
                 // Notebook-only extras (matplotlib, jupyter kernels, etc.) live
                 // in the optional `[notebook]` extra when the project ships
@@ -248,6 +247,15 @@ with open('isort-checkstyle.xml', 'w') as f:
                 echo 'Running project examples...'
                 sh '''
                     for f in examples/*.py; do
+                        if [ -f "$f" ]; then
+                            echo "Verifying $f..."
+                            ${VENV_BIN}/python3 "$f"
+                        fi
+                    done
+                    # Directory examples opt in by shipping a run.py entry point;
+                    # network-dependent / install-only example apps ship no run.py
+                    # and are skipped by construction.
+                    for f in examples/*/run.py; do
                         if [ -f "$f" ]; then
                             echo "Verifying $f..."
                             ${VENV_BIN}/python3 "$f"
