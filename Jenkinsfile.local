@@ -42,9 +42,9 @@ pipeline {
                 // Internal Gearlux dependencies — installed FIRST with --no-deps
                 // so .[dev] below finds them pre-satisfied instead of hitting PyPI
                 // (Gearlux distribution names are intentionally unpublished on PyPI).
-                sh "if [ -d '${env.WORKSPACE_ROOT}/confluid' ]; then ${VENV_BIN}/uv pip install --no-deps -e '${env.WORKSPACE_ROOT}/confluid'; else ${VENV_BIN}/uv pip install --no-deps git+https://github.com/Gearlux/confluid.git@main; fi"
                 sh "if [ -d '${env.WORKSPACE_ROOT}/liquifai' ]; then ${VENV_BIN}/uv pip install --no-deps -e '${env.WORKSPACE_ROOT}/liquifai'; else ${VENV_BIN}/uv pip install --no-deps git+https://github.com/Gearlux/liquifai.git@main; fi"
                 sh "if [ -d '${env.WORKSPACE_ROOT}/loggair' ]; then ${VENV_BIN}/uv pip install --no-deps -e '${env.WORKSPACE_ROOT}/loggair'; else ${VENV_BIN}/uv pip install --no-deps git+https://github.com/Gearlux/loggair.git@main; fi"
+                sh "if [ -d '${env.WORKSPACE_ROOT}/confluid' ]; then ${VENV_BIN}/uv pip install --no-deps -e '${env.WORKSPACE_ROOT}/confluid'; else ${VENV_BIN}/uv pip install --no-deps git+https://github.com/Gearlux/confluid.git@main; fi"
                 sh "if [ -d '${env.WORKSPACE_ROOT}/recordstream' ]; then ${VENV_BIN}/uv pip install --no-deps -e '${env.WORKSPACE_ROOT}/recordstream'; else ${VENV_BIN}/uv pip install --no-deps git+https://github.com/Gearlux/recordstream.git@main; fi"
                 sh "${VENV_BIN}/uv pip install -e .[dev]"
                 // Notebook-only extras (matplotlib, jupyter kernels, etc.) live
