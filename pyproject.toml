@@ -7,7 +7,10 @@ dependencies = [
     "confluid>=0.1.0",
     "loggair>=0.1.0",
     "recordstream>=0.1.0",
-    "torch",
+    # NOTE: no torch. The IR (`ir.py`) is plain dataclasses and the frontend (`frontend.py`)
+    # reads recordstream's parsed FlowStep list — neither imports a framework, and the package
+    # declared `torch` without ever referencing it. A backend that emits torch code adds a
+    # `[torch]` extra plus a `[tool.aisland] frameworks` declaration at that point.
     "numpy",
     "typing-extensions",
 ]
