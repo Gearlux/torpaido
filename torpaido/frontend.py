@@ -1,7 +1,7 @@
 """Front end: a record-pipeline GRAPH becomes a torpaido IR graph.
 
 Compilation starts from a graph, so this reads one — ``recordstream``'s parsed
-:class:`~recordstream.flow.FlowStep` list, where every edge is explicit:
+:class:`~recordstream.flow.steps.FlowStep` list, where every edge is explicit:
 
     step.from_ / step.merge_from / step.bind   ->   Node.inputs
     step.name                                  ->   Node.outputs
@@ -66,7 +66,7 @@ def graph_from_steps(
 ) -> Graph:
     """Build a torpaido :class:`~torpaido.ir.Graph` from a parsed flow-step list.
 
-    ``steps`` is what ``recordstream.flow.parse_flow`` returns (or ``FlowGraph.steps``);
+    ``steps`` is what ``recordstream.flow.parse.parse_flow`` returns (or ``FlowGraph.steps``);
     ``outputs`` names the step whose result the pipeline yields — blank means the last step,
     the same default the flow grammar uses. A step with no explicit ``from_`` reads the
     previous step, so this fills that implicit edge in: the IR must be explicit even where the
