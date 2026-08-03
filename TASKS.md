@@ -10,4 +10,3 @@ workspace root `TASKS.md`. Completed items are not archived here — git history
 - [ ] **ONNX Plugin:** Implement the universal ONNX exporter. @high @feature
 - [ ] **TensorRT Plugin:** Implement hardware-specific NVIDIA optimization. @low @performance
 - [ ] **RecordStream Bridge:** Add `.forge()` fluent API to the RecordStream engine. @medium @integration
-- [ ] **Torpaido (Compiler):** Implement the high-performance compilation engine for RecordStream pipelines (TorchScript, ONNX, TensorRT). @high @performance
