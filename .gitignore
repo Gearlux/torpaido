@@ -44,3 +44,10 @@ coverage.xml
 test-report.xml
 coverage/
 /pyrightconfig.json
+
+# Run output — every run (training, evaluation, prediction, sweep cell) writes here.
+# ONE ignored root per project: matrainer trackers default to `save_dir: ./runs`, and
+# Lightning checkpoints follow the tracker's save_dir, so a whole run lands under one
+# directory instead of scattering run-named trees into the repository root.
+# See the workspace AGENTS.md mandate "Run Output Lands In A Gitignored `runs/`".
+runs/
