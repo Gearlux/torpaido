@@ -29,6 +29,7 @@ jobs:
         
         # Internal Gearlux dependencies — installed FIRST with --no-deps so
         # `-e .[dev]` below finds them pre-satisfied instead of hitting PyPI.
+        uv pip install --system --no-deps git+https://github.com/Gearlux/loggair.git@main
         uv pip install --system --no-deps git+https://github.com/Gearlux/confluid.git@main
         uv pip install --system --no-deps git+https://github.com/Gearlux/liquifai.git@main
         uv pip install --system --no-deps git+https://github.com/Gearlux/recordstream.git@main
@@ -59,6 +60,7 @@ jobs:
         
         # Internal Gearlux dependencies — installed FIRST with --no-deps so
         # `-e .[dev]` below finds them pre-satisfied instead of hitting PyPI.
+        uv pip install --system --no-deps git+https://github.com/Gearlux/loggair.git@main
         uv pip install --system --no-deps git+https://github.com/Gearlux/confluid.git@main
         uv pip install --system --no-deps git+https://github.com/Gearlux/liquifai.git@main
         uv pip install --system --no-deps git+https://github.com/Gearlux/recordstream.git@main
@@ -94,6 +96,7 @@ jobs:
         
         # Internal Gearlux dependencies — installed FIRST with --no-deps so
         # `-e .[dev]` below finds them pre-satisfied instead of hitting PyPI.
+        uv pip install --system --no-deps git+https://github.com/Gearlux/loggair.git@main
         uv pip install --system --no-deps git+https://github.com/Gearlux/confluid.git@main
         uv pip install --system --no-deps git+https://github.com/Gearlux/liquifai.git@main
         uv pip install --system --no-deps git+https://github.com/Gearlux/recordstream.git@main
@@ -133,6 +136,7 @@ jobs:
         
         # Internal Gearlux dependencies — installed FIRST with --no-deps so
         # `-e .[dev]` below finds them pre-satisfied instead of hitting PyPI.
+        uv pip install --system --no-deps git+https://github.com/Gearlux/loggair.git@main
         uv pip install --system --no-deps git+https://github.com/Gearlux/confluid.git@main
         uv pip install --system --no-deps git+https://github.com/Gearlux/liquifai.git@main
         uv pip install --system --no-deps git+https://github.com/Gearlux/recordstream.git@main
