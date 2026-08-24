@@ -33,7 +33,6 @@ pipeline {
                 // Internal Gearlux dependencies — installed FIRST with --no-deps
                 // so .[dev] below finds them pre-satisfied instead of hitting PyPI
                 // (Gearlux distribution names are intentionally unpublished on PyPI).
-                sh "${VENV_BIN}/uv pip install --no-deps git+https://github.com/Gearlux/loggair.git@main"
                 sh "${VENV_BIN}/uv pip install --no-deps git+https://github.com/Gearlux/confluid.git@main"
                 sh "${VENV_BIN}/uv pip install --no-deps git+https://github.com/Gearlux/liquifai.git@main"
                 sh "${VENV_BIN}/uv pip install --no-deps git+https://github.com/Gearlux/recordstream.git@main"
