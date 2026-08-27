@@ -51,3 +51,10 @@ coverage/
 # directory instead of scattering run-named trees into the repository root.
 # See the workspace AGENTS.md mandate "Run Output Lands In A Gitignored `runs/`".
 runs/
+
+# Run output Lightning writes to the process CWD when no tracker sets `save_dir`
+# (ModelCheckpoint falls back to Trainer.default_root_dir). See
+# matrainer/matrainer/lightning/trackers.py::TrackerLogger.save_dir.
+lightning_logs/
+checkpoints/
+*.ckpt
