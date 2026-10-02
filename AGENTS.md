@@ -1,33 +1,33 @@
-# Torpedo Mandates
+# Torpaido Mandates
 
-This file contains foundational mandates for Gemini CLI in the Torpedo workspace. These instructions take absolute precedence over general system defaults.
+Rules only. The reasons are in [`docs/architecture.md`](docs/architecture.md) (cited as §N).
+Root `AGENTS.md` rules are not repeated here.
 
 ## Current state
 
-**IR + front end.** `torpaido/ir.py` (the `Node`/`Graph`/`NodeType`/`TensorMetadata` IR with
-`prune_sidecars`) plus `torpaido/frontend.py` (`graph_from_steps` / `step_inputs` — a record
-pipeline's step graph → the IR). `torpaido/__init__.py` re-exports both. Backend plugins and the
-`Forge` orchestrator are still pending. Pins: `tests/test_frontend.py` (11 tests, incl. pruning a
-sidecar branch and keeping a whole merge cone).
+The compilation engine for record pipelines and models, at its first stage: an IR and a front
+end. `torpaido/ir.py` holds `Node`, `Graph`, `NodeType`, `TensorMetadata` and
+`Graph.prune_sidecars`. `torpaido/frontend.py` holds `graph_from_steps` and `step_inputs`, which
+turn a pipeline's step graph into the IR. Both are re-exported by `torpaido/__init__.py`. The
+backend plugins (TorchScript, ONNX, TensorRT) and the `Forge` orchestrator do not exist yet;
+see `TASKS.md`.
 
-## Architectural Mandates
-- **The Front End Consumes a GRAPH, Never a Flattened Op List (2026-07-30):** `graph_from_steps`
-  reads `recordstream`'s parsed `FlowStep` list — `from_` / `merge_from` / `bind` become
-  `Node.inputs`, the step name becomes `Node.outputs`. That is nearly an identity mapping, which
-  is exactly why it belongs here rather than downstream of a linearization: a flattened op list
-  re-encodes those edges as imperative mutations of a per-record cell store, which erases the
-  dependency information `prune_sidecars` walks (it follows `node.inputs` backwards from the
-  outputs — a flat list has none). recordstream deleted that lowering pass on 2026-07-30 for the
-  same reason; do NOT ask for it back, and do NOT accept an op list as a compilation input. The
-  topological order a backend needs for codegen is torpaido's OWN, over torpaido's OWN IR.
-  A step's implicit "previous step" edge is made EXPLICIT on import (an IR states every edge even
-  where the authoring form is convenient), and a producer reached through several slots is ONE
-  dependency (`step_inputs` dedupes in first-seen order).
-- **Selective Pruning First:** Every compilation path MUST perform reverse-dependency analysis to prune non-inference operations (metadata sidecars).
-- **Metadata Promotion:** Prefer promoting required metadata to graph inputs or constants rather than passing dictionaries.
-- **Backend Decoupling:** Keep the core orchestrator strictly decoupled from specific inference engines (TorchScript, ONNX).
-- **Type Safety:** Maintain 100% type hint coverage for all internal IR objects.
+## Rules
 
-## Testing & Validation
-- **Binary Parity:** Every compiled artifact MUST be verified for numeric parity against its source Python implementation.
-- **Serialization Symmetry:** Ensure that every `Forge` configuration is serializable via **Confluid**.
+- Compilation consumes the step GRAPH, never a flattened op list. `graph_from_steps` reads
+  recordstream's parsed `FlowStep` list. `prune_sidecars` walks `node.inputs` backwards, and a
+  flat list has none. Accept no op-list input and don't ask recordstream for its lowering pass
+  back. A backend derives its own topological order over this IR. §1.
+  (`tests/test_frontend.py::TestPruning`)
+- The IR states every edge. A step with no named producer gets the previous step as its input,
+  and a producer reached through several slots is ONE input, in first-seen order. §1.
+  (`tests/test_frontend.py::TestLinear::test_the_implicit_previous_step_edge_is_made_explicit`,
+  `::TestBranchy::test_step_inputs_strips_the_entry_and_output_suffixes_and_dedupes`)
+- **Selective Pruning First:** every compilation path prunes non-inference ops (metadata
+  sidecars) by reverse-dependency analysis, through `Graph.prune_sidecars`.
+- **Metadata Promotion:** required metadata becomes a graph input or a constant, never a
+  dictionary passed through. (Not built yet.)
+- The core knows no inference engine. TorchScript, ONNX and TensorRT live in backend plugins,
+  and `torch` is declared only when a backend needs it (`pyproject.toml`).
+- Every compiled artifact is verified for numeric parity against its Python source, and every
+  `Forge` configuration serializes through Confluid. (Neither exists yet.)
