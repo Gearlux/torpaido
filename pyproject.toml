@@ -1,7 +1,7 @@
 [project]
 name = "torpaido"
 version = "0.1.0"
-description = "High-performance compilation and optimization engine for the Modular Quartet."
+description = "High-performance compilation and optimization engine for record pipelines and PyTorch models."
 authors = [{ name = "Taidal", email = "info@gearlux.ai" }]
 dependencies = [
     "confluid>=0.1.0",

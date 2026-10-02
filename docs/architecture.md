@@ -21,11 +21,12 @@ in one of two shapes, and until 2026-07-30 the producing package could emit eith
 The flat form looks like the more "compiled" one — it is a straight sequence, closer to what a
 backend eventually emits — which makes it a tempting input. It is the wrong one.
 
-Every mandate in this project's `AGENTS.md` starts from dependencies. **Selective Pruning First**
+The mandates in this project's `AGENTS.md` start from dependencies. **Selective Pruning First**
 requires reverse-dependency analysis; `Graph.prune_sidecars` implements it by walking
 `node.inputs` backwards from `self.outputs`. **Metadata Promotion** requires knowing which values
-a node actually consumes. **Unpacked Handover** requires knowing which producer feeds which
-consumer so a boxed record can be replaced with direct tensor-to-tensor edges.
+a node actually consumes. The design goal **Unpacked Handover** (the README) likewise requires
+knowing which producer feeds which consumer so a boxed record can be replaced with direct
+tensor-to-tensor edges.
 
 A flat op list carries none of that. Its ops have no `inputs`: the edges live in the *side
 effects* of cell ops, and recovering them means re-deriving the graph — i.e. running the lifting

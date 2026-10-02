@@ -1,8 +1,8 @@
-# Torpedo
+# Torpaido
 
-**Torpedo** is a high-performance compilation and optimization engine designed to transform functional **RecordStream** pipelines and PyTorch models into optimized, production-ready inference artifacts.
+**Torpaido** is a high-performance compilation and optimization engine designed to transform functional **RecordStream** pipelines and PyTorch models into optimized, production-ready inference artifacts.
 
-Part of the **Modular Quintet**: `Loggair`, `Confluid`, `Liquify`, `RecordStream`, and `Torpedo`.
+Built on `Confluid` (configuration), `Loggair` (logging) and `RecordStream` (the record pipelines it compiles).
 
 ## 🚀 Key Features
 
@@ -10,7 +10,7 @@ Part of the **Modular Quintet**: `Loggair`, `Confluid`, `Liquify`, `RecordStream
 -   **Metadata Promotion:** Replaces heavy dictionary lookups with direct graph inputs and constants.
 -   **Pluggable Backends:** First-class support for **TorchScript**, **ONNX**, and **TensorRT**.
 -   **Unpacked Handover:** Eliminates boxing/unboxing overhead in the compiled computational path.
--   **Confluid Integration:** Fully configurable via YAML manifests for 100% reproducible deployments.
+-   **Confluid Integration:** Fully configurable via Confluid YAML for 100% reproducible deployments.
 
 ## 🎯 Design Goals & Requirements
 
@@ -25,7 +25,7 @@ Part of the **Modular Quintet**: `Loggair`, `Confluid`, `Liquify`, `RecordStream
 
 ### Precision
 - **Numeric Parity:** Ensure compiled outputs match the floating-point results of the source Python implementation.
-- **Symmetry:** Compiled artifacts must be verifiable against their source Confluid manifests.
+- **Symmetry:** Compiled artifacts must be verifiable against their source Confluid configuration.
 
 ## 🛠 The front end — compilation starts from a GRAPH
 
