@@ -119,3 +119,22 @@ def test_a_lowering_that_writes_other_entries_than_its_op_is_refused(project: Pa
 
 def _unused(record: Record) -> Any:  # keeps the Record import honest for readers of the fixtures above
     return sample_record()
+
+
+def test_a_model_lowering_is_found_by_the_held_object_s_exact_class() -> None:
+    from torpaido.lowering import lowers_model, model_lowering_for
+
+    class Held:
+        pass
+
+    class HeldToo(Held):
+        pass
+
+    @lowers_model(Held)
+    def lower_held(model: Held, pictures: object, ctx: object) -> dict:
+        return {}
+
+    assert model_lowering_for(Held()) is lower_held
+    assert model_lowering_for(HeldToo()) is None
+    with pytest.raises(ValueError, match="Held already has a model lowering"):
+        lowers_model(Held)(lambda model, pictures, ctx: {})

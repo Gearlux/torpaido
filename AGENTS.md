@@ -66,6 +66,15 @@ runtime branches, a draw's refusal by name — `TASKS.md`.
   `::test_a_pruned_node_without_a_lowering_is_not_refused`,
   `::test_a_lowering_that_writes_other_entries_than_its_op_is_refused`,
   `::test_a_varying_value_where_a_constant_is_needed_is_refused_naming_the_dependency`)
+- **An object an op HOLDS lowers through its own registry**: `@lowers_model(Class)` / `model_lowering_for(obj)`,
+  exact class, one per class, found by the same `discover()`. The OP's lowering states the tensor contract its held
+  object must meet; torpaido knows no contract. (`tests/test_lowering.py::test_a_model_lowering_is_found_by_the_held_object_s_exact_class`)
+- `lower_convert_to_image` (`lowering/recordstream.py`) renders the `gray` colormap of a 2-D map only — quantized by
+  truncation as the op does, resized by a bilinear filter WITH antialiasing (PIL's BILINEAR within 1 of 255) — and
+  refuses another colormap or a 3-D array by name. A parity tolerance on an integer array is an absolute step
+  (`parity.compare`: `{"image": {"atol": 1}}`). (`tests/test_convert_to_image.py`)
+- `CompilePackage.overrides` are the package op's own dotted keys, applied through `load_package_graph` and written in
+  the manifest: what was compiled is the overridden graph. (`tests/test_compile_package.py::test_overrides_reach_the_package_s_graph_and_are_written_in_the_manifest`)
 - **Items split by ONE rule serving both faces.** `item_rule(type)` gives the registered
   `@lowers_item` rule or the introspected default (array → `data`; `NDArrayItem` → `data` + attrs;
   number → `value` scalar part; string/None → `value` fact; dataclass field by field: arrays and
