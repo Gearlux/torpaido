@@ -53,7 +53,7 @@ recordstream run compile/detector.yaml
 | `samples` | a source of records (anything iterable) — measured on, verified against |
 | `sample_count` | how many records to take from `samples` (default 4) |
 | `output_dir` | somewhere else than `<package>/compiled/<name>` |
-| `tolerances` | `atol` / `rtol` defaults and per-entry overrides for parity |
+| `tolerances` | `atol` / `rtol` defaults and per-entry overrides for parity; an entry whose item rule compares its own way (a set of boxes matched by overlap) reads its keys from the entry's mapping (§8) |
 | `description` | one line for the manifest |
 
 A compile that fails parity leaves `<name>.partial/` with its `parity.yaml` and raises; a compile that
@@ -210,15 +210,43 @@ records:
 - {record: 2, differences: []}
 ```
 
+Each output entry is compared by its item rule: part by part — arrays within `atol` / `rtol`, integers by
+whole steps, facts exactly — unless the rule gives its own `compare(expected, actual, tolerances)`. A rule
+does that when its rows have no order of their own: a detector's boxes are ranked by the model, and two
+scores a hair apart swap places on a picture that differs by one grey level, so a row-by-row compare fails
+a correct artifact. Such a rule matches the rows (by overlap and label) and reads its own keys from the
+entry's tolerance mapping:
+
+```yaml
+tolerances:
+  atol: 1.0e-05                                   # the defaults, for every part-by-part entry
+  predictions: {iou: 0.9, score_atol: 0.02}       # what the box set's rule reads
+```
+
+```python
+class BoxSetRule(ItemRule):
+    def compare(self, expected, actual, tolerances):
+        unmatched = ...  # rows of `expected` with no row of `actual` of the same label at IoU >= tolerances.get("iou", 0.99)
+        return [("boxes", f"{len(unmatched)} rows unmatched")] if unmatched else []
+```
+
 On a failure the compile raises, and the report carries `first_disagreeing_node` — the first step whose
-lowering, run eagerly in torch, disagrees with its numpy op on that record — so the fix is a lowering,
-named, not a tensor diff.
+lowering, run eagerly in torch, disagrees with its numpy op on that record, judged by the same tolerances —
+and `first_node_differences`, that node's own measured gaps (`[{entry, part, measure}]`), so the fix is a
+lowering, named, with its error in hand, not a tensor diff:
+
+```yaml
+status: failed
+first_disagreeing_node: picture/image
+first_node_differences:
+- {entry: image, part: data, measure: 'max |a - b| = 1.0 (atol 1e-05, rtol 0.0001)'}
+```
 
 ## 9. Backends
 
 | `backend:` | class | writes | runs with |
 | --- | --- | --- | --- |
-| `torchscript` | `torpaido.backends.TorchScript` | `model.pt` | `torch.jit.load` (the C++ runtimes that exist today) |
+| `torchscript` | `torpaido.backends.TorchScript` | `model.pt` (a trace of the lowered module: a size read off a tensor stays dynamic) | `torch.jit.load` (the C++ runtimes that exist today) |
 | `torch-export` | `torpaido.backends.TorchExport` | `program.pt2` | `torch.export.load` |
 
 Both start from the same exported program; the manifest is the same whichever wrote the files.

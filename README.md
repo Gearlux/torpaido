@@ -215,7 +215,7 @@ feeds the engine with `split` and writes the record back with `join` — so the 
 
 | backend | `backend:` | writes | runs with | extra |
 | --- | --- | --- | --- | --- |
-| `torpaido.backends.TorchScript` | `torchscript` | `model.pt` | `torch.jit.load` — the C++ runtimes that exist today | `[torch]` |
+| `torpaido.backends.TorchScript` | `torchscript` | `model.pt` — a trace of the lowered module, so a size read off a tensor (a picture as tall as its raster) stays dynamic | `torch.jit.load` — the C++ runtimes that exist today | `[torch]` |
 | `torpaido.backends.TorchExport` | `torch-export` | `program.pt2` | `torch.export.load` | `[torch]` |
 
 `torch.export` is the hub: one lowered program, every backend writes it out. The port names travel
@@ -223,14 +223,16 @@ inside the artifact, so a runner built from the folder alone knows the input ord
 
 ## Parity
 
-Every sample record goes through the Python graph and the artifact; each output entry is compared part by
-part — arrays within `atol` / `rtol` (defaults `1e-5` / `1e-4`, per entry under `tolerances:`), integers
-and facts exactly. A failing compile leaves `compiled/<name>.partial/` with `parity.yaml` and names the
-first step whose lowering disagrees with its op:
+Every sample record goes through the Python graph and the artifact; each output entry is compared by its
+item rule — part by part, arrays within `atol` / `rtol` (defaults `1e-5` / `1e-4`, per entry under
+`tolerances:`), integers and facts exactly — or the rule's own way when its rows have no order of their own
+(a box set matched by overlap and label; the entry's tolerance mapping carries the rule's keys). A failing
+compile leaves `compiled/<name>.partial/` with `parity.yaml` and names the first step whose lowering
+disagrees with its op, with the gap measured there:
 
 ```
-CompilePackage: parity failed on record 1: predictions.boxes max |a - b| = 0.0312 (atol 1e-05, rtol 0.0001);
-the first node that disagrees is 'raster/spectrogram' — the report is …/compiled/torchscript.partial/parity.yaml
+CompilePackage: parity failed on record 1: predictions.boxes 2 of 7 expected and 1 of 6 compiled regions unmatched (IoU >= 0.9, same label; 0 allowed);
+the first node that disagrees is 'picture/image' (image.data max |a - b| = 1.0 (atol 1e-05, rtol 0.0001)) — the report is …/compiled/torchscript.partial/parity.yaml
 ```
 
 ## Installation

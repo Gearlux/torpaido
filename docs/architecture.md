@@ -257,12 +257,22 @@ number; string); `@lowers_item(Type)` registers an override. The SAME rule deriv
 interface at compile time, feeds the engine in `CompiledPackage` (`split`) and writes the record back
 (`join`). Labels are `int64` indices; the vocabulary is `class_names.json`, copied into the folder.
 
+The rule also owns how two items of its type are judged EQUAL for parity: by default part by part (what
+`split` gives), or by its own `compare(expected, actual, tolerances)` when the parts' order carries no
+meaning — a detector's rows are ordered by its ranking, and two scores a hair apart swap places on a
+picture one grey level different, so a row-by-row compare fails a correct artifact (measured 2026-10-13: a
+compiled picture differs from numpy's by one level on 13 % of its pixels after the resize and quantization).
+`parity.compare` hands such a rule the entry's own tolerance mapping (`predictions: {iou: 0.9}`), the
+`atol` / `rtol` defaults merged in, and records what it returns as the entry's differences.
+
 ### Consequences
 
 * The manifest's `inputs:` / `outputs:` are `<entry>.<part>` ports with dtype, shape and item type; a
   deployment runtime reads names, never conventions.
 * A non-numeric list (a list of strings) is a fact and must be constant across the samples; a domain
   whose item needs another split registers a rule (a region set as one `[N, 4]` tensor).
+* A domain's notion of "the same set" lives in its rule, beside its split, not in a tolerance table in
+  the compiler: the compiler never learns what a box is.
 
 ### Example
 
@@ -270,12 +280,24 @@ interface at compile time, feeds the engine in `CompiledPackage` (`split`) and w
 parts, facts = item_rule(Image).split(image)      # {"data": <uint8 HWC>}, {"layout": "HWC"}
 item_rule(Label).split(Label(3))                  # {"value": 3}, {"classes": None}
 item_rule(Image).join({"data": array}, {"layout": "HWC"})
+
+
+@lowers_item(BoxSet)
+class BoxSetRule(ItemRule):
+    def split(self, item): ...
+    def join(self, parts, facts): ...
+
+    def compare(self, expected, actual, tolerances):   # a set: rows matched by overlap and label
+        floor = tolerances.get("iou", 0.99)
+        unmatched = [row for row in expected.rows if not any(iou(row, other) >= floor for other in actual.rows)]
+        return [("boxes", f"{len(unmatched)} rows unmatched")] if unmatched else []
 ```
 
 ### What you may change
 
 Add introspected kinds (a `PIL` image, a `pathlib.Path` fact) and domain rules; never a second
-conversion path beside `split` / `join`.
+conversion path beside `split` / `join`, and never a comparison table in the compiler that knows an
+item type by name — a rule's `compare` is where that knowledge goes.
 
 ---
 
@@ -292,9 +314,16 @@ baked into its interfaces, and a failure anywhere surfaced as a TorchScript erro
 order, nodes in schedule order, each lowering run with the values it reads, outputs flattened to tensors),
 runs it eagerly on the first sample (modules and buffers register, writes are checked, per-node outputs
 kept for the bisect), and exports it with `torch.export` under the dynamic shapes the envelope states.
-A `Backend` takes the `Program` and writes files (`TorchScript`: `torch.jit.trace` of the exported
+A `Backend` takes the `Program` and writes files (`TorchScript`: `torch.jit.trace` of the LOWERED
 module → `model.pt`; `TorchExport`: `torch.export.save` → `program.pt2`) and gives a `Runner` from the
-folder alone: the port names travel inside the artifact as an extra file. Backends are
+folder alone: the port names travel inside the artifact as an extra file. The TorchScript trace is of the
+eager lowered module, not of the exported program's module (changed 2026-10-13): export turns a size a
+lowering reads off a tensor — a picture as tall as its raster, resized to a fixed width — into a
+`sym_size.int` node, and `torch.jit.trace` bakes that node's int to the trace sample's value, so the
+artifact resized every record to the first sample's height (measured: 40 rows in, 30 out) while the
+eager trace keeps the same size as an `aten::size`. The exported program still validates every lowering
+under the envelope and is what `TorchExport` saves — the hub stays; TorchScript's file is traced beside
+it. Backends are
 `@configurable(category="compiler_backend")`; `backend_named` resolves a manifest's `backend:`.
 TorchScript came first (user decision D4) because the deployment runtime that exists loads it.
 
@@ -369,10 +398,12 @@ beside it that nobody read at deployment.
 ### Decision
 
 `CompilePackage` runs every sample record through the Python graph and the artifact and compares each
-output entry part by part (`parity.compare`: arrays within `atol`/`rtol`, integers and facts exactly, a
-per-entry tolerance winning). A failure writes `parity.yaml` into `<name>.partial/`, names the FIRST node
-whose eager torch outputs disagree with its op's Tracer snapshot (the bisect), and the folder is never
-moved into place. The folder is STANDALONE (user ruling D3, 2026-10-13): `compiled.yaml` (format 1,
+output entry by its item rule (`parity.compare`: part by part — arrays within `atol`/`rtol`, integers by
+whole steps, facts exactly, a per-entry tolerance winning — or the rule's own `compare`, record 5, for a
+set whose rows have no order). A failure writes `parity.yaml` into `<name>.partial/`, names the FIRST node
+whose eager torch outputs disagree with its op's Tracer snapshot (the bisect, judged by the same
+tolerances) together with that node's own measured gaps (`first_node_differences`, repeated in the
+error's text), and the folder is never moved into place. The folder is STANDALONE (user ruling D3, 2026-10-13): `compiled.yaml` (format 1,
 generator header), the backend's files, a copy of `class_names.json`, `parity.yaml`; the package is named
 only as provenance (`source.package`, `source.package_sha256`). `CompiledPackage(path=<folder>)` runs
 it after the package is gone, refusing a record outside the envelope by part and both values. The
@@ -383,14 +414,24 @@ weights).
 
 * A compile is a verified claim: what landed in the folder answered as the Python graph did on every
   sample record.
-* A domain item needing a tolerant comparison (boxes matched by IoU) registers it with its rule
-  (`TASKS.md`); the default is part-wise closeness.
+* A domain item needing a tolerant comparison (boxes matched by IoU) carries it in its rule's `compare`
+  (record 5); the default is part-wise closeness. The compiler never learns an item type by name.
+* The report says where AND by how much: the first disagreeing node's gap is in `parity.yaml` and in
+  the error, so a lowering is fixed from the report, not re-measured.
 
 ### Example
 
 ```
 CompilePackage: parity failed on record 1: scores.data max |a - b| = 139.4 (atol 1e-05, rtol 0.0001);
-the first node that disagrees is 'pre/bright' — the report is …/compiled/ts.partial/parity.yaml
+the first node that disagrees is 'pre/bright' (image.data max |a - b| = 139.4 (atol 1e-05, rtol 0.0001)) — the report is …/compiled/ts.partial/parity.yaml
+```
+
+```yaml
+# parity.yaml of that failure
+status: failed
+first_disagreeing_node: pre/bright
+first_node_differences:
+- {entry: image, part: data, measure: 'max |a - b| = 139.4 (atol 1e-05, rtol 0.0001)'}
 ```
 
 ### What you may change
