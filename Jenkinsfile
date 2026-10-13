@@ -34,7 +34,8 @@ pipeline {
                 // so .[dev] below finds them pre-satisfied instead of hitting PyPI
                 // (these are not released on PyPI; a released one resolves through .[dev]).
                 sh "${VENV_BIN}/uv pip install --no-deps git+https://github.com/Gearlux/recordstream.git@main"
-                sh "${VENV_BIN}/uv pip install -e .[dev]"
+                sh "${VENV_BIN}/uv pip install --no-deps git+https://github.com/Gearlux/matrainer.git@main"
+                sh "${VENV_BIN}/uv pip install -e .[dev,torch]"
                 // Notebook-only extras (matplotlib, jupyter kernels, etc.) live
                 // in the optional `[notebook]` extra when the project ships
                 // notebooks; absence is not an error.
