@@ -15,6 +15,10 @@ the outputs, and a flattened list has no ``inputs``. So torpaido consumes the gr
 linearization it needs for codegen is its OWN topological order over its OWN IR — not
 another package's runtime protocol.
 
+A step whose op is a subgraph is INLINED: its inner steps become ``<step>/<inner>`` nodes — the
+names recordstream's Tracer gives them, so a measurement and a refusal name the same node — and
+the step itself stays as an identity node over the inner result, which later steps read through.
+
 Usage::
 
     from recordstream.flow import parse_flow
@@ -25,14 +29,19 @@ Usage::
     graph.prune_sidecars()          # drops everything the output does not depend on
 """
 
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Set
 
-from torpaido.ir import Graph, Node, NodeType
+from torpaido.ir import SOURCE_NODE, Graph, Node, NodeType
 
-__all__ = ["graph_from_steps", "step_inputs"]
+__all__ = ["SOURCE_NODE", "graph_from_steps", "step_inputs", "is_subgraph"]
 
-#: The record entry a step reads when nothing names its producer — the pipeline's own input.
-SOURCE_NODE = "source"
+#: The separator between a subgraph step and its inner steps, as recordstream's Tracer names them.
+INNER = "/"
+
+
+def is_subgraph(op: Any) -> bool:
+    """True for an op whose body is a flow — read off the CLASS marker recordstream's own duck-typing uses."""
+    return getattr(type(op), "FLOW_SUBGRAPH", False) is True
 
 
 def step_inputs(step: Any) -> List[str]:
@@ -63,6 +72,7 @@ def graph_from_steps(
     outputs: str = "",
     name: str = "pipeline",
     attributes: Optional[Dict[str, Dict[str, Any]]] = None,
+    locations: Optional[Dict[str, str]] = None,
 ) -> Graph:
     """Build a torpaido :class:`~torpaido.ir.Graph` from a parsed flow-step list.
 
@@ -73,55 +83,97 @@ def graph_from_steps(
     authoring form is convenient.
 
     ``attributes`` optionally supplies per-step metadata (``{step name: {...}}``) to stamp on
-    the emitted node — a backend's knobs, kept out of this module's vocabulary.
+    the emitted node — a backend's knobs, kept out of this module's vocabulary. ``locations``
+    gives each step's ``file:line:col`` (``{step name: where}``); an inner node of a subgraph
+    inherits its step's location, suffixed with its own name, because a built subgraph keeps no
+    trace of where its inner steps were written.
 
     Args:
         steps: Parsed flow steps, in schedule order (document order IS the schedule).
         outputs: Name of the yielded step; blank = the last step.
         name: Graph name, carried into the IR.
         attributes: Optional per-step attribute dicts to attach to the emitted nodes.
+        locations: Optional ``file:line:col`` per step, carried into every refusal that names the node.
 
     Returns:
-        A `Graph` with one INPUT node (the source record), one OP node per step, and the
-        yielded step registered as the graph output.
+        A `Graph` with one INPUT node (the source record), one OP node per step (a subgraph step's
+        inner steps as ``<step>/<inner>`` nodes, the step itself an identity over its result), and
+        the yielded step registered as the graph output.
 
     Raises:
         ValueError: ``outputs`` does not name a step, or a step references an unknown one.
     """
     graph = Graph(name)
     graph.add_node(Node(name=SOURCE_NODE, node_type=NodeType.INPUT))
+    known: Set[str] = {SOURCE_NODE}
+    last = _add_steps(graph, steps, "", [SOURCE_NODE], known, attributes or {}, locations or {}, "")
 
-    known = {SOURCE_NODE}
+    yielded = str(outputs) if outputs else (last or SOURCE_NODE)
+    if yielded not in known:
+        raise ValueError(f"torpaido.frontend: outputs {yielded!r} does not name a step ({sorted(known)}).")
+    graph.outputs.append(yielded)
+    return graph
+
+
+def _add_steps(
+    graph: Graph,
+    steps: Sequence[Any],
+    prefix: str,
+    entry_inputs: List[str],
+    known: Set[str],
+    attributes: Dict[str, Dict[str, Any]],
+    locations: Dict[str, str],
+    inherited_where: str,
+) -> Optional[str]:
+    """Add one step list (a flow, or a subgraph's inside under ``prefix``); returns the last node added.
+
+    Inside a subgraph a step with no named producer reads the record the subgraph received
+    (``entry_inputs``) when it is the first inner step, else the inner step before it — the same
+    rule the outer flow follows with the source record.
+    """
     previous: Optional[str] = None
-    attributes = attributes or {}
-
     for step in steps:
-        step_name = str(step.name)
-        inputs = step_inputs(step)
-        if not inputs:
-            # No named producer: the step reads whatever ran before it (the source, first).
-            inputs = [previous or SOURCE_NODE]
+        step_name = prefix + str(step.name)
+        refs = step_inputs(step)
+        inputs = [prefix + ref for ref in refs] if refs else ([previous] if previous else list(entry_inputs))
         unknown = [ref for ref in inputs if ref not in known]
         if unknown:
             raise ValueError(
                 f"torpaido.frontend: step {step_name!r} references unknown step(s) {unknown} — "
                 "a flow step may only read an EARLIER step (document order is the schedule)."
             )
-        graph.add_node(
-            Node(
-                name=step_name,
-                node_type=NodeType.OP,
-                op_type=type(step.op).__name__ if step.op is not None else None,
-                inputs=inputs,
-                outputs=[step_name],
-                attributes=dict(attributes.get(step_name, {})),
+        where = locations.get(step_name, "") or (f"{inherited_where} (step {step_name})" if inherited_where else "")
+        if step.op is not None and is_subgraph(step.op):
+            # The inside becomes `<step>/<inner>` nodes reading what the step reads; the step itself is
+            # an identity over the inner result, so a later `from: <step>` still resolves.
+            inner_last = _add_steps(
+                graph, step.op.flow_steps, step_name + INNER, inputs, known, attributes, locations, where
             )
-        )
+            result = step_name + INNER + str(step.op.output_step)
+            graph.add_node(
+                Node(
+                    name=step_name,
+                    node_type=NodeType.OP,
+                    op_type=type(step.op).__name__,
+                    inputs=[result if result in known else str(inner_last)],
+                    outputs=[step_name],
+                    attributes=dict(attributes.get(step_name, {})),
+                    where=where,
+                )
+            )
+        else:
+            graph.add_node(
+                Node(
+                    name=step_name,
+                    node_type=NodeType.OP,
+                    op_type=type(step.op).__name__ if step.op is not None else None,
+                    inputs=inputs,
+                    outputs=[step_name],
+                    attributes=dict(attributes.get(step_name, {})),
+                    op=step.op,
+                    where=where,
+                )
+            )
         known.add(step_name)
         previous = step_name
-
-    yielded = str(outputs) if outputs else (previous or SOURCE_NODE)
-    if yielded not in known:
-        raise ValueError(f"torpaido.frontend: outputs {yielded!r} does not name a step ({sorted(known)}).")
-    graph.outputs.append(yielded)
-    return graph
+    return previous

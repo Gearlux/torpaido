@@ -5,12 +5,18 @@ Root `AGENTS.md` rules are not repeated here.
 
 ## Current state
 
-The compilation engine for record pipelines and models, at its first stage: an IR and a front
-end. `torpaido/ir.py` holds `Node`, `Graph`, `NodeType`, `TensorMetadata` and
-`Graph.prune_sidecars`. `torpaido/frontend.py` holds `graph_from_steps` and `step_inputs`, which
-turn a pipeline's step graph into the IR. Both are re-exported by `torpaido/__init__.py`. The
-backend plugins (TorchScript, ONNX, TensorRT) and the `Forge` orchestrator do not exist yet;
-see `TASKS.md`.
+The compiler of model packages (matrainer's `package.yaml` + graphs + weights + `class_names.json`).
+One config run, `runnable: !class:torpaido.CompilePackage`, writes a STANDALONE compiled folder
+(`compiled.yaml`, the backend's files, a copy of `class_names.json`, `parity.yaml`), default
+`<package>/compiled/<name>/`; `!class:torpaido.CompiledPackage {path: <compiled folder>}` runs it as
+one op. Five passes: `matrainer.model_package.load_package_graph` → `frontend.graph_from_steps`
+(subgraphs inlined) → `dataflow.measure` (reads/writes measured by ablation on the sample records,
+then `Graph.prune_sidecars`) → `program.build_program` (one `torch.export` program from the
+registered lowerings) → a backend (`backends.TorchScript`, `backends.TorchExport`) plus
+`parity.compare` with a per-node bisect. Torpaido ships recordstream's op lowerings
+(`lowering/recordstream.py`); a domain package ships its own behind a `[compile]` extra and the
+entry-point group `torpaido.lowerings`. Not built: ONNX and the other backends, any domain lowering,
+runtime branches, a draw's refusal by name — `TASKS.md`.
 
 ## Rules
 
@@ -23,11 +29,94 @@ see `TASKS.md`.
   and a producer reached through several slots is ONE input, in first-seen order. §1.
   (`tests/test_frontend.py::TestLinear::test_the_implicit_previous_step_edge_is_made_explicit`,
   `::TestBranchy::test_step_inputs_strips_the_entry_and_output_suffixes_and_dedupes`)
-- **Selective Pruning First:** every compilation path prunes non-inference ops (metadata
-  sidecars) by reverse-dependency analysis, through `Graph.prune_sidecars`.
-- **Metadata Promotion:** required metadata becomes a graph input or a constant, never a
-  dictionary passed through. (Not built yet.)
-- The core knows no inference engine. TorchScript, ONNX and TensorRT live in backend plugins,
-  and `torch` is declared only when a backend needs it (`pyproject.toml`).
-- Every compiled artifact is verified for numeric parity against its Python source, and every
-  `Forge` configuration serializes through Confluid. (Neither exists yet.)
+- A subgraph step is INLINED as `<step>/<inner>` nodes — the Tracer's names, so a measurement and a
+  refusal name the same node — and the step itself stays an identity node over its inner result. An
+  inner node inherits its step's location, suffixed `(step <name>)`. §3.
+  (`tests/test_frontend.py::TestSubgraphs`)
+- **Dataflow is MEASURED, never declared.** `measure` runs every sample record on recordstream's
+  `Tracer`; a node's writes are the Tracer's `changed` (+ `removed`), its reads are found by
+  ABLATION (the op rerun with one entry left out: raising, dropping, or a changed write = read). An
+  op that writes nothing reads nothing. Reads and writes must agree across the samples or the compile
+  is refused naming the node and both records. `consumes` / `produces` are never consulted. §2.
+  (`tests/test_dataflow.py::test_each_node_reads_what_its_op_used_and_writes_what_it_changed`,
+  `::test_a_read_that_depends_on_the_record_is_refused_naming_the_node_and_both_records`)
+- A read resolves to the nearest ancestor over the STRUCTURAL edges (the `from:` chain first) that
+  wrote the entry; a branch reads its own producer, not the latest write. Only after every read is
+  resolved are `Node.inputs` narrowed to the producers. §2.
+  (`tests/test_dataflow.py::test_a_branch_reads_its_own_producer_not_the_latest_write`)
+- **Selective Pruning First:** every compilation path prunes through `Graph.prune_sidecars` (it
+  returns the op nodes dropped, kept as `Graph.pruned` for the manifest). The outputs default to
+  the entries the last WRITING node on the path to the yielded step wrote; `outputs:` chooses
+  otherwise, and an entry nothing writes is refused listing what is written. `Graph.input_values`
+  is DERIVED from the surviving nodes' reads. §2.
+  (`tests/test_dataflow.py::test_pruning_drops_everything_the_outputs_never_need`,
+  `::test_the_outputs_may_be_chosen`, `::test_an_output_nothing_writes_is_refused_naming_what_is_written`)
+- **A lowering is ONE function per op class**, `(op, reads, ctx) -> writes`, registered with
+  `@lowers(OpClass)` by EXACT class (a subclass inherits nothing), found by `lowering_for`, discovered
+  by `discover()` (torpaido's own module, then the entry-point group `torpaido.lowerings` through
+  confluid's `load_configurables`). A class has exactly one. §4.
+  (`tests/test_lowering.py::test_a_lowering_is_found_by_the_exact_op_class`,
+  `::test_registering_a_second_lowering_for_a_class_is_refused`,
+  `::test_discover_imports_the_entry_point_group_and_torpaido_s_own_lowerings`)
+- A surviving node without a lowering is refused at its `file:line:col`, naming what it writes and
+  how to register one; a pruned node needs none. A lowering's writes must equal the op's measured
+  writes. A lowering needing a constant calls `ctx.constant`, which refuses a varying value naming
+  the input it depends on. §4.
+  (`tests/test_lowering.py::test_a_surviving_node_without_a_lowering_is_refused_at_its_location`,
+  `::test_a_pruned_node_without_a_lowering_is_not_refused`,
+  `::test_a_lowering_that_writes_other_entries_than_its_op_is_refused`,
+  `::test_a_varying_value_where_a_constant_is_needed_is_refused_naming_the_dependency`)
+- **Items split by ONE rule serving both faces.** `item_rule(type)` gives the registered
+  `@lowers_item` rule or the introspected default (array → `data`; `NDArrayItem` → `data` + attrs;
+  number → `value` scalar part; string/None → `value` fact; dataclass field by field: arrays and
+  number lists are data parts, numbers scalar parts, the rest facts; `bool` is a fact). The compiler
+  derives the interface from `split`; the compiled op feeds with `split` and writes back with
+  `join`. Never a second conversion path. §5.
+  (`tests/test_items.py`, `tests/test_compile_package.py::test_the_compiled_folder_runs_on_its_own_after_the_package_is_gone`)
+- **`torch.export` is the hub.** `build_program` runs every lowering eagerly on the first sample
+  (modules/buffers register, writes are checked, per-node outputs kept), then exports; a backend
+  takes the `Program` and writes files, and gives a runner from the folder alone — the port names
+  travel INSIDE the artifact. Backends are `@configurable(category="compiler_backend")`;
+  `backend_named` resolves a manifest's `backend:`. §6.
+  (`tests/test_program.py::test_a_backend_reproduces_the_python_graph_on_a_picture_of_another_size`)
+- **The envelope decides what is fixed.** `<entry>.<part>: varies` = every dimension dynamic (a data
+  part) or a 0-d input tensor (a scalar); a value = fixed and `specialized`; unnamed = fixed at the
+  samples' value (they must agree) — except a tensor dimension the samples disagree on, which is
+  dynamic. An envelope key naming no input part is refused listing them. Output dimensions are
+  measured over the samples; output facts and constant parts land under `constants`. §7.
+  (`tests/test_program.py::test_the_interface_lists_the_tensor_ports_and_specializes_the_rest`,
+  `::test_a_fixed_input_must_agree_across_the_samples`,
+  `::test_an_envelope_naming_no_input_part_is_refused_listing_them`)
+- **Parity decides the compile.** Every sample record through the Python graph (`run_steps_multi`)
+  and the artifact; `parity.compare` per entry and part (arrays within `atol`/`rtol`, integers and
+  facts exact; a per-entry tolerance wins). A failure leaves `<name>.partial/` with `parity.yaml`,
+  names the FIRST node whose eager torch outputs disagree with its op's (the bisect), and the
+  compiled folder is never moved into place. §8.
+  (`tests/test_parity.py::test_a_wrong_lowering_fails_the_compile_and_names_the_first_disagreeing_node`)
+- **The compiled folder is STANDALONE** (user ruling 2026-10-13): `class_names.json` is copied in,
+  the manifest names the package only as provenance (`source.package`, `source.package_sha256`), and
+  `CompiledPackage(path=<compiled folder>)` runs it after the package is gone. Default location
+  `<package>/compiled/<name>/`, `output_dir` elsewhere; a non-empty folder that is not a compiled
+  package is never written into; a compile replaces its folder. §8.
+  (`tests/test_compile_package.py::test_the_compiled_folder_runs_on_its_own_after_the_package_is_gone`,
+  `::test_a_folder_that_is_not_a_compiled_package_is_never_written_into`)
+- The op refuses a record the artifact was not compiled for, naming the part and both values (a
+  specialized value, another dtype, another rank or fixed size, a missing entry); `consumes` /
+  `produces` are read off the manifest's `consumes` / `produces`.
+  (`tests/test_compile_package.py::test_a_record_outside_the_envelope_is_refused_naming_the_part_and_both_values`,
+  `::test_the_op_declares_what_it_consumes_and_produces_from_the_manifest`)
+- A package is loaded ONLY through `matrainer.model_package.load_package_graph(..., owner="CompilePackage")`
+  — the op's own loader; step locations come from a second, document-stage load of its `request`.
+  Never a `confluid.load` of a package written here.
+- No new verb: a compile is a `runnable:` (`recordstream run compile.yaml`); the op is an `op:`.
+  No fluent `.forge()` API, no `matrainer compile` subcommand.
+- `torch` is imported only in `lowering/context.py`, `lowering/recordstream.py`, `program.py`,
+  `backends/` and a backend's runner; `torpaido/__init__.py` reaches `CompilePackage` /
+  `CompiledPackage` lazily (PEP 562) and the IR, front end and dataflow pass import no framework.
+  `pyproject.toml` declares torch under `[torch]`, named by `[tool.aisland] frameworks`.
+- `compiled.yaml` is format 1 and carries the generator header; a field a reader may ignore is
+  added freely, a field that changes meaning bumps `COMPILED_FORMAT`; the op refuses another format.
+  (`tests/test_compile_package.py::test_the_manifest_carries_the_generator_header`,
+  `::test_a_compiled_package_of_another_format_is_refused`)
+- Tests run from inside `torpaido/`; a Python snippet that imports workspace packages runs from a
+  directory that is NOT the workspace root (the project folders shadow the packages there).
