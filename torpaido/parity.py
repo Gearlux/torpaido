@@ -55,13 +55,13 @@ def _compare_part(entry: str, part: str, expected: Any, actual: Any, atol: float
         return [Difference(entry, part, f"shape {a.shape} != {b.shape}")]
     if a.size == 0:
         return []
-    if a.dtype.kind in "biu" or b.dtype.kind in "biu":
-        if a.dtype.kind in "biu" and b.dtype.kind in "biu":
-            return (
-                []
-                if np.array_equal(a, b)
-                else [Difference(entry, part, f"{int((a != b).sum())} of {a.size} values differ")]
-            )
+    if a.dtype.kind in "biu" and b.dtype.kind in "biu":
+        # Integer arrays: exact, unless an absolute tolerance is given (a quantized picture may differ by a step).
+        gap_int = np.abs(a.astype(np.int64) - b.astype(np.int64))
+        if int(gap_int.max()) <= int(atol):
+            return []
+        over = int((gap_int > atol).sum())
+        return [Difference(entry, part, f"{over} of {a.size} values differ by more than {atol:g}")]
     if a.dtype.kind in "fcbiu" and b.dtype.kind in "fcbiu":
         if np.allclose(a, b, atol=atol, rtol=rtol, equal_nan=True):
             return []

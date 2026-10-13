@@ -89,6 +89,9 @@ class CompilePackage:
         name: The compiled folder's name under ``<package>/compiled/``; also how a consumer tells the forms apart.
         backend: The backend that writes the artifact (``!class:torpaido.backends.TorchScript {}``);
             ``None`` = TorchScript.
+        overrides: Dotted keys into the package's graph and their values, applied after it and its weight slots —
+            the same setting the package op takes (``{flow.detect.op.device: cpu, flow.detect.op.masks_output: ""}``).
+            They are part of what was compiled and are written in the manifest.
         outputs: The record entries the artifact must deliver; ``None`` = what the last writing step writes.
         envelope: ``{"<entry>.<part>": "varies" | value}`` — which input parts vary (a dynamic dimension, a
             scalar input) and which are fixed to a value. What it does not name is fixed at the samples' value.
@@ -114,6 +117,7 @@ class CompilePackage:
         package: str = "",
         name: str = "torchscript",
         backend: Any = None,
+        overrides: Optional[Dict[str, Any]] = None,
         outputs: Optional[List[str]] = None,
         envelope: Optional[Dict[str, Any]] = None,
         samples: Any = None,
@@ -126,6 +130,8 @@ class CompilePackage:
         self.name = name
         # `Any`: a backend is any object meeting the Backend protocol; a sample source any iterable of records.
         self.backend = backend
+        # `Any` values: an override replaces any setting of any class the package's graph holds.
+        self.overrides: Dict[str, Any] = dict(overrides) if overrides else {}
         self.outputs = list(outputs) if outputs else None
         self.envelope = dict(envelope) if envelope else None
         self.samples = samples
@@ -142,7 +148,7 @@ class CompilePackage:
             raise ValueError("CompilePackage: 'name' is blank — name the compiled folder")
         if self.samples is None:
             raise ValueError("CompilePackage: 'samples' is not set — name a source of records")
-        loaded = load_package_graph(self.package, owner="CompilePackage")
+        loaded = load_package_graph(self.package, self.overrides, owner="CompilePackage")
         records = [copy.deepcopy(record) for record in islice(iter(self.samples), self.sample_count)]
         if not records:
             raise ValueError("CompilePackage: 'samples' yielded no record")
@@ -244,6 +250,7 @@ class CompilePackage:
             },
             "files": [{"path": path.name, "sha256": file_digest(path)} for path in files],
             "class_names": CLASS_NAMES_FILE if class_names else None,
+            "overrides": dict(self.overrides),
             "consumes": dict(interface.consumes),
             "produces": dict(interface.produces),
             "inputs": {port.name: port.as_dict() for port in interface.inputs},
