@@ -133,8 +133,10 @@ def lower_convert_to_image(op: ConvertToImage, reads: Values, ctx: Context) -> V
     gray = torch.where(torch.as_tensor(span > 0), norm, torch.zeros_like(norm)).to(torch.uint8)
     if op.flip_vertical:
         gray = torch.flip(gray, dims=[0])
-    target = _target_size(op, int(gray.shape[0]), int(gray.shape[1]))
-    if target is not None and target != (int(gray.shape[1]), int(gray.shape[0])):
+    # The sizes stay what the shape gives (an int, or a symbol under export when a dimension varies): a picture
+    # whose height follows the raster keeps a symbolic height through the resize.
+    target = _target_size(op, gray.shape[0], gray.shape[1])
+    if target is not None and (target[0] != gray.shape[1] or target[1] != gray.shape[0]):
         width, height = target
         resized = torch.nn.functional.interpolate(
             gray.to(torch.float32)[None, None],
@@ -148,7 +150,7 @@ def lower_convert_to_image(op: ConvertToImage, reads: Values, ctx: Context) -> V
     return {op.output: ItemValue(Image, {"data": rgb}, {"layout": "HWC"})}
 
 
-def _target_size(op: ConvertToImage, height_px: int, width_px: int) -> Optional[Tuple[int, int]]:
+def _target_size(op: ConvertToImage, height_px: Any, width_px: Any) -> Optional[Tuple[Any, Any]]:
     """``(width, height)`` the op's sizing rule asks for, or ``None`` for the pixels as they are (the op's table)."""
     width, height = op.width, op.height
     if width is None and height is None:
