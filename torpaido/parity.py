@@ -1,8 +1,9 @@
 """Parity: the Python graph against the artifact, entry by entry, part by part, with a measured difference.
 
 A comparison is by the entry's item rule — the same split the artifact's interface was derived from —
-so an item of several parts (a box set's rows, labels and scores) is compared part by part. Arrays
-are compared within ``atol`` / ``rtol`` (``max |a - b|`` reported), integers and facts exactly. A
+so an item of several parts is compared part by part: arrays within ``atol`` / ``rtol`` (``max |a - b|``
+reported), integers and facts exactly. A rule whose rows have no order of their own (a detector's boxes) gives
+its own :meth:`~torpaido.lowering.items.ItemRule.compare` and receives the entry's tolerance mapping. A
 tolerance per entry (``{"scores": {"atol": 0.5}}``) wins over the defaults.
 """
 
@@ -84,9 +85,14 @@ def compare(
             differences.append(Difference(entry, "", f"type {type(expected).__name__} != {type(actual).__name__}"))
             continue
         rule = item_rule(type(expected))
+        bounds = tolerances_for(entry, tolerances)
+        own = tolerances.get(entry)
+        measured = rule.compare(expected, actual, {**bounds, **(own if isinstance(own, Mapping) else {})})
+        if measured is not None:  # the rule's own comparison (a set matched by overlap, not row by row)
+            differences.extend(Difference(entry, part, measure) for part, measure in measured)
+            continue
         parts_a, facts_a = rule.split(expected)
         parts_b, facts_b = rule.split(actual)
-        bounds = tolerances_for(entry, tolerances)
         for part, held in parts_a.items():
             if part not in parts_b:
                 differences.append(Difference(entry, part, "missing"))

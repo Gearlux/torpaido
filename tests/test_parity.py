@@ -58,11 +58,44 @@ def test_a_wrong_lowering_fails_the_compile_and_names_the_first_disagreeing_node
 
     with pytest.raises(ValueError, match="parity failed on record 1: scores.data max") as refused:
         CompilePackage(package=str(package), name="ts", samples=samples).run()
-    assert "the first node that disagrees is 'pre/bright'" in str(refused.value)
+    assert "the first node that disagrees is 'pre/bright' (image.data max |a - b| = " in str(refused.value)
     partial = package / "compiled" / "ts.partial"
     assert partial.is_dir() and not (package / "compiled" / "ts").exists()
     report = yaml.safe_load((partial / PARITY_FILE).read_text())
     assert report["status"] == "failed"
     assert report["first_disagreeing_node"] == "pre/bright"
+    (at_node,) = report["first_node_differences"]  # that node's own measured gap, so the reader does not re-derive it
+    assert at_node["entry"] == "image" and at_node["part"] == "data" and at_node["measure"].startswith("max |a - b| = ")
     assert report["records"][0]["differences"][0]["entry"] == "scores"
     assert (partial / COMPILED_FILE).exists() is False
+
+
+def test_a_rule_s_own_comparison_wins_over_the_part_by_part_one() -> None:
+    from dataclasses import dataclass
+    from typing import Any, List, Mapping, Optional, Tuple
+
+    from torpaido.lowering import ItemRule, lowers_item
+
+    @dataclass
+    class Bag:  # rows in no order of their own
+        values: List[float]
+
+    @lowers_item(Bag)
+    class BagRule(ItemRule):
+        def split(self, item: Bag) -> tuple:
+            return {"values": np.asarray(item.values)}, {}
+
+        def join(self, parts: dict, facts: dict) -> Bag:
+            return Bag(list(np.asarray(parts["values"])))
+
+        def compare(self, expected: Any, actual: Any, tolerances: Mapping[str, Any]) -> Optional[List[Tuple[str, str]]]:
+            missing = sorted(set(expected.values) - set(actual.values))
+            allowed = int(tolerances.get("unmatched", 0))
+            return [] if len(missing) <= allowed else [("values", f"{len(missing)} values unmatched: {missing}")]
+
+    reference: Record = {"bag": Bag([1.0, 2.0, 3.0])}
+    assert compare(reference, {"bag": Bag([3.0, 1.0, 2.0])}, ["bag"], {}) == []  # the same set, another order
+    assert compare(reference, {"bag": Bag([1.0, 2.0])}, ["bag"], {}) == [
+        Difference(entry="bag", part="values", measure="1 values unmatched: [3.0]")
+    ]
+    assert compare(reference, {"bag": Bag([1.0, 2.0])}, ["bag"], {"bag": {"unmatched": 1}}) == []

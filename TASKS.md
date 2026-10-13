@@ -11,4 +11,3 @@ workspace root `TASKS.md`. Completed items are not archived here — git history
 - [ ] **`varies` per dimension** (`image.data: [varies, varies, 3]`) when a package needs a fixed channel count beside free spatial dimensions; today `varies` frees every dimension and the default frees the dimensions the samples disagree on. @low @feature
 - [ ] **Output dimensions on one sample:** `varies` on an input cannot show on an output when there is one sample (one shape); derive output dynamism from the exported program's symbolic shapes instead of measuring over samples. @low @feature
 - [ ] **More backends behind their extras:** AOTInductor (`.so` for libtorch C++, the modern replacement of TorchScript), ExecuTorch, TensorRT, CoreML, OpenVINO. @low @feature
-- [ ] **A domain's parity rule:** let an `ItemRule` carry a `compare` (boxes matched by IoU and label, not row by row) that `parity.compare` uses when present. @medium @feature

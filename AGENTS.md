@@ -97,11 +97,26 @@ runtime branches, a draw's refusal by name — `TASKS.md`.
   `::test_a_fixed_input_must_agree_across_the_samples`,
   `::test_an_envelope_naming_no_input_part_is_refused_listing_them`)
 - **Parity decides the compile.** Every sample record through the Python graph (`run_steps_multi`)
-  and the artifact; `parity.compare` per entry and part (arrays within `atol`/`rtol`, integers and
-  facts exact; a per-entry tolerance wins). A failure leaves `<name>.partial/` with `parity.yaml`,
-  names the FIRST node whose eager torch outputs disagree with its op's (the bisect), and the
-  compiled folder is never moved into place. §8.
-  (`tests/test_parity.py::test_a_wrong_lowering_fails_the_compile_and_names_the_first_disagreeing_node`)
+  and the artifact; `parity.compare` per entry by its item rule — part by part (arrays within
+  `atol`/`rtol`, integers by whole steps, facts exact; a per-entry tolerance wins), or the rule's own
+  `ItemRule.compare(expected, actual, tolerances)` when it returns a list (a set of boxes matched by
+  overlap and label, never row by row — a model's row order is its ranking), the entry's tolerance
+  mapping handed to it with the `atol`/`rtol` defaults merged in. A failure leaves `<name>.partial/`
+  with `parity.yaml`, names the FIRST node whose eager torch outputs disagree with its op's (the
+  bisect, judged by the same tolerances) and that node's measured gaps (`first_node_differences`, also
+  in the error's text), and the compiled folder is never moved into place. §8.
+  (`tests/test_parity.py::test_a_wrong_lowering_fails_the_compile_and_names_the_first_disagreeing_node`,
+  `::test_a_rule_s_own_comparison_wins_over_the_part_by_part_one`)
+- **The TorchScript file is a trace of the LOWERED module, never of the exported one** (2026-10-13):
+  `torch.export` turns a size a lowering reads off a tensor (a picture as tall as its raster, resized
+  to a fixed width) into a `sym_size.int` node, and `torch.jit.trace` bakes that node's int to the
+  trace sample's value — the artifact then resized every record to the first sample's height
+  (measured: 40 rows in, 30 out, every piece plan the sample's). `backends.TorchScript.compile`
+  traces `program.module` (eager: the same size is an `aten::size` the trace keeps dynamic); the
+  exported program still validates the lowering under the envelope and is what `TorchExport` saves.
+  A lowering still reads a size off a tensor (`_extent`-style), never from Python arithmetic on a
+  shape, so eager and export agree.
+  (`tests/test_convert_to_image.py::test_a_torchscript_artifact_keeps_a_raster_following_height_dynamic`)
 - **The compiled folder is STANDALONE** (user ruling 2026-10-13): `class_names.json` is copied in,
   the manifest names the package only as provenance (`source.package`, `source.package_sha256`), and
   `CompiledPackage(path=<compiled folder>)` runs it after the package is gone. Default location

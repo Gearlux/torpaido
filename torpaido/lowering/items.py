@@ -25,6 +25,7 @@ from typing import (
     Any,
     Callable,
     Dict,
+    List,
     Mapping,
     Optional,
     Tuple,
@@ -120,7 +121,12 @@ class ItemValue:
 
 
 class ItemRule:
-    """How one item type splits into parts and facts and joins back; subclass and register with :func:`lowers_item`."""
+    """How one item type splits into parts and facts and joins back; subclass and register with :func:`lowers_item`.
+
+    A rule may also say how two items of its type are COMPARED for parity (:meth:`compare`): the default is part by
+    part, which is wrong for a set whose rows have no order of their own (a detector's boxes) — such a rule matches
+    the rows and reports what is unmatched.
+    """
 
     item_type: type = object
 
@@ -129,6 +135,13 @@ class ItemRule:
 
     def join(self, parts: Parts, facts: Facts) -> Any:
         raise NotImplementedError(f"{type(self).__name__} must implement join(parts, facts) -> item")
+
+    def compare(self, expected: Any, actual: Any, tolerances: Mapping[str, Any]) -> Optional[List[Tuple[str, str]]]:
+        """``[(part, measure), ...]`` of the disagreements between two items, or ``None`` to compare part by part.
+
+        ``tolerances`` is the entry's own mapping (``atol``, ``rtol`` and whatever keys the rule reads).
+        """
+        return None
 
 
 class ArrayRule(ItemRule):

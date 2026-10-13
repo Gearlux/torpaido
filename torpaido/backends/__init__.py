@@ -92,7 +92,14 @@ def _interface_json(program: Program) -> str:
 
 @configurable(category="compiler_backend")
 class TorchScript:
-    """TorchScript: ``model.pt``, a trace of the exported module — what a ``torch::jit::load`` runtime takes.
+    """TorchScript: ``model.pt``, a trace of the LOWERED module — what a ``torch::jit::load`` runtime takes.
+
+    The trace is of the eager lowered module (``program.module``), not of the exported program's module: under
+    ``torch.export`` a size a lowering reads off a tensor (a picture as tall as its raster, resized to a fixed width)
+    becomes a ``sym_size.int`` node, and ``torch.jit.trace`` turns that node's Python int into a CONSTANT — the
+    artifact then resizes every record to the trace sample's size (measured 2026-10-13: a 40-row picture came out
+    30 rows, the first sample's). Traced eagerly, the same size is an ``aten::size`` the trace keeps dynamic. The
+    exported program still validates the lowering under the envelope and is what :class:`TorchExport` saves.
 
     TorchScript is in maintenance upstream; it stays a backend because the deployment runtimes that exist
     load it, and the manifest is the same whichever backend wrote the files.
@@ -106,7 +113,7 @@ class TorchScript:
 
         path = Path(out) / self.file_name
         with _torchscript_api():
-            traced = torch.jit.trace(program.exported.module(), program.example_inputs, strict=False, check_trace=False)
+            traced = torch.jit.trace(program.module, program.example_inputs, strict=False, check_trace=False)
             torch.jit.save(traced, str(path), _extra_files={INTERFACE_FILE: _interface_json(program)})
         return [path]
 
