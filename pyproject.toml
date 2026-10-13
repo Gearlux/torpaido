@@ -1,25 +1,34 @@
 [project]
 name = "torpaido"
 version = "0.1.0"
-description = "High-performance compilation and optimization engine for the Modular Quartet."
+description = "High-performance compilation and optimization engine for record pipelines and PyTorch models."
 authors = [{ name = "Taidal", email = "info@gearlux.ai" }]
 dependencies = [
     "confluid>=0.1.0",
     "loggair>=0.1.0",
-    # recordstream ships as a pre-release (0.1.0a1). Under PEP 440 a plain `>=0.1.0`
+    # recordstream and matrainer ship as pre-releases (0.1.0aN). Under PEP 440 a plain `>=0.1.0`
     # EXCLUDES every pre-release of 0.1.0, so it would resolve to nothing.
     "recordstream>=0.1.0a1",
-    # NOTE: no torch. The IR (`ir.py`) is plain dataclasses and the frontend (`frontend.py`)
-    # reads recordstream's parsed FlowStep list — neither imports a framework, and the package
-    # declared `torch` without ever referencing it. A backend that emits torch code adds a
-    # `[torch]` extra plus a `[tool.aisland] frameworks` declaration at that point.
+    # The unit a compile takes is a matrainer MODEL PACKAGE (its graph, weights and class names);
+    # matrainer's core is framework-free, so this costs no framework.
+    "matrainer>=0.1.0a1",
+    # NOTE: no torch in the core. The IR (`ir.py`), the front end (`frontend.py`) and the dataflow
+    # pass (`dataflow.py`) read recordstream's parsed FlowStep list and run its kernel — no framework.
+    # The lowering language and the backends are torch: the `[torch]` extra below.
     "numpy",
+    # compiled.yaml / parity.yaml are written and read as YAML.
+    "pyyaml",
     "typing-extensions",
 ]
 requires-python = ">=3.12"
 
 [project.optional-dependencies]
+# The lowering language (every lowering is a torch function), the `torch.export` hub and the
+# TorchScript / `.pt2` backends. `[tool.aisland] frameworks` below names it, so the workspace's
+# framework selection installs it.
+torch = ["torch"]
 dev = [
+    "torpaido[torch]",
     "black>=24.0.0,<25.0.0",
     "isort>=5.13.0,<6.0.0",
     "flake8>=6.0.0,<8.0.0",
@@ -39,6 +48,18 @@ include = ["torpaido*"]
 
 [tool.setuptools.package-data]
 torpaido = ["py.typed"]
+
+# Registration is an import side effect: a discovery service imports these modules and finds the
+# `@configurable` runnable (CompilePackage), op (CompiledPackage) and backends. The package
+# `__init__` reaches the two classes lazily, so it stays here module by module.
+[project.entry-points."confluid.configurables"]
+torpaido-compile = "torpaido.compile"
+torpaido-compiled = "torpaido.compiled"
+torpaido-backends = "torpaido.backends"
+
+# The frameworks this project has an extra for — `aisland framework set torch` installs `torpaido[torch]`.
+[tool.aisland]
+frameworks = ["torch"]
 
 [tool.black]
 line-length = 120

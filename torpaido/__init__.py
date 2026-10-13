@@ -1,29 +1,46 @@
-"""Torpaido — the compilation and optimization engine for record pipelines and models.
+"""Torpaido: compiles a model package — its inference graph, its weights, its class names — into an inference artifact.
 
-Two surfaces so far: the internal representation (:mod:`torpaido.ir`) and the front end that
-builds one from a record pipeline (:mod:`torpaido.frontend`). Compilation consumes a GRAPH —
-see the front end's module docstring for why that is the input shape rather than a flattened
-op sequence.
+The IR and the front end need no framework; the two config-facing classes, :class:`CompilePackage` (a
+runnable) and :class:`CompiledPackage` (an op), are reached lazily so that importing the package costs
+no torch import — the lowering language and the backends import it when they run.
 """
 
 from importlib.metadata import PackageNotFoundError, version
+from typing import TYPE_CHECKING, Any
 
-from torpaido.frontend import SOURCE_NODE, graph_from_steps, step_inputs
-from torpaido.ir import Graph, Node, NodeType, TensorMetadata
+from torpaido.frontend import graph_from_steps, step_inputs
+from torpaido.ir import Graph, Node, NodeType, TensorMetadata, Value
+
+if TYPE_CHECKING:
+    from torpaido.compile import CompilePackage
+    from torpaido.compiled import CompiledPackage
 
 try:
-    # Single source of truth: the installed distribution's metadata, i.e. pyproject.toml's
-    # `version` (the distribution is `torpaido`). Never type the number in here as well.
     __version__ = version("torpaido")
-except PackageNotFoundError:  # pragma: no cover - uninstalled source checkout
+except PackageNotFoundError:  # an uninstalled checkout
     __version__ = "0.0.0.dev0"
 
 __all__ = [
+    "CompilePackage",
+    "CompiledPackage",
     "Graph",
     "Node",
     "NodeType",
     "TensorMetadata",
-    "SOURCE_NODE",
+    "Value",
     "graph_from_steps",
     "step_inputs",
+    "__version__",
 ]
+
+
+def __getattr__(name: str) -> Any:  # PEP 562: the config-facing classes, without importing torch at package import
+    if name == "CompilePackage":
+        from torpaido.compile import CompilePackage
+
+        return CompilePackage
+    if name == "CompiledPackage":
+        from torpaido.compiled import CompiledPackage
+
+        return CompiledPackage
+    raise AttributeError(f"module 'torpaido' has no attribute {name!r}")

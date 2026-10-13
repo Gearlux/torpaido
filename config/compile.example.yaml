@@ -1,0 +1,47 @@
+# torpaido/config/compile.example.yaml — every knob of a compile, documented. Copy, trim, run:
+#
+#   recordstream run compile.yaml
+#
+# A compile writes a STANDALONE compiled folder (compiled.yaml, the backend's files, a copy of
+# class_names.json, parity.yaml), by default <package>/compiled/<name>/, and runs the artifact on the
+# sample records against the Python graph before moving it into place.
+
+runnable: !class:torpaido.CompilePackage
+  # The model package folder PackageModel wrote ($VAR and ~ expanded). Required.
+  package: ./runs/detector/package
+  # The compiled folder's name under <package>/compiled/; how a consumer tells the forms apart.
+  name: torchscript
+  # The backend that writes the artifact. Left out: TorchScript.
+  #   !class:torpaido.backends.TorchScript {}    model.pt      torch.jit.load (the C++ runtimes that exist)
+  #   !class:torpaido.backends.TorchExport {}    program.pt2   torch.export.load
+  backend: !class:torpaido.backends.TorchScript {}
+  # The record entries the artifact must deliver. Left out: the entries written by the last writing
+  # step on the way to the graph's yielded step. Everything the outputs never need is pruned.
+  outputs: [predictions]
+  # What the artifact is compiled FOR, per input part "<entry>.<part>":
+  #   varies    a data part: every dimension dynamic; a scalar part: a 0-d input tensor
+  #   <value>   fixed: baked in and written under compiled.yaml's `specialized:`; a record with another
+  #             value is refused by CompiledPackage
+  #   (unnamed) fixed at the samples' value, which every sample must share — except a tensor dimension
+  #             the samples disagree on, which is dynamic
+  envelope:
+    signal.samplerate: 100e6
+    signal.data: varies
+  # The records the compiler measures the dataflow on and verifies the artifact against: anything
+  # iterable yielding records. Required.
+  samples: !class:recordstream.sources.range.RangeSource
+    source: !include ../data/captures.source.yaml
+    stop: 8
+  # How many records to take from `samples`.
+  sample_count: 8
+  # Somewhere else than <package>/compiled/<name>. The folder must be empty, new, or a compiled package
+  # (replaced); a folder holding anything else is refused untouched.
+  # output_dir: ./runs/detector/shipped
+  # Parity: arrays within atol / rtol, integers and facts exactly; a per-entry mapping wins over the
+  # defaults.
+  tolerances:
+    atol: 1.0e-5
+    rtol: 1.0e-4
+    predictions: {atol: 1.0e-3}
+  # One line for the manifest's reader.
+  description: the detector, scripted for the 100 MSa/s analyzer

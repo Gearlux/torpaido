@@ -21,11 +21,12 @@ in one of two shapes, and until 2026-07-30 the producing package could emit eith
 The flat form looks like the more "compiled" one — it is a straight sequence, closer to what a
 backend eventually emits — which makes it a tempting input. It is the wrong one.
 
-Every mandate in this project's `AGENTS.md` starts from dependencies. **Selective Pruning First**
+The mandates in this project's `AGENTS.md` start from dependencies. **Selective Pruning First**
 requires reverse-dependency analysis; `Graph.prune_sidecars` implements it by walking
 `node.inputs` backwards from `self.outputs`. **Metadata Promotion** requires knowing which values
-a node actually consumes. **Unpacked Handover** requires knowing which producer feeds which
-consumer so a boxed record can be replaced with direct tensor-to-tensor edges.
+a node actually consumes. The design goal **Unpacked Handover** (the README) likewise requires
+knowing which producer feeds which consumer so a boxed record can be replaced with direct
+tensor-to-tensor edges.
 
 A flat op list carries none of that. Its ops have no `inputs`: the edges live in the *side
 effects* of cell ops, and recovering them means re-deriving the graph — i.e. running the lifting
@@ -91,3 +92,308 @@ sorted(graph.nodes)              # ['left', 'out', 'right', 'source', 'start'] �
   `attributes=` argument — keep backend vocabulary out of the front end itself.
 - **Do NOT add an op-list front end.** The reasoning above is the whole record; if a future
   producer only emits a flat list, the fix is upstream.
+
+---
+
+## 2. Dataflow is measured by ablation on sample records, never read off declarations (`torpaido.dataflow`, 2026-10-13)
+
+### Context
+
+Pruning and the artifact's interface both need to know which record entry each step READS and WRITES.
+recordstream's ops declare `consumes` / `produces`, but the declarations are documentary — recordstream's
+own words: "nothing validates them against the op's behavior" — and a step-level edge ("this step reads
+the previous step's record") is a superset that prunes nothing: in a linear chain every step "needs" every
+earlier one. The reference compiler never had this information and compiled every transform in,
+training-only sidecars included.
+
+### Decision
+
+`measure(steps, result, records)` runs every sample record through the graph on recordstream's own
+`Tracer` (snapshots per node, `changed` / `removed` per node) and derives, per node:
+
+* **writes** = `changed`, **removes** = `removed`;
+* **reads** by ABLATION: the op is rerun on its input snapshot with ONE entry left out; if it raises,
+  drops the record, or any written entry comes out different (`same`, element for element), that entry
+  was read. An op that writes nothing reads nothing.
+
+Every sample record is measured; a node whose reads or writes differ between two records is refused
+naming the node and both records — a data-dependent read has no static graph. A read then resolves to
+the nearest ancestor over the STRUCTURAL `inputs` (depth-first, the `from:` chain first) that wrote the
+entry; the resolution runs for every node before `Node.inputs` is narrowed to the producers, because a
+narrowed earlier node would cut the chain for a later one. The outputs default to what the last writing
+node on the path to the yielded step wrote.
+
+Rejected: trusting declarations (prunes a needed step when a declaration is stale); a recording record
+(a dict logging `__getitem__`) — type-dispatched ops iterate `items()` and would read everything, while
+`field=""` ops that scan by type would read nothing.
+
+### Consequences
+
+* Pruning is exact, and the artifact's inputs are exactly the source entries the surviving nodes read.
+* The compile needs real records and runs each op once per input entry per sample — on a model step that
+  is one model call per entry. Acceptable for a compile; the cost on a large package is to be measured
+  (`TASKS.md`).
+* An op whose result depends on an entry only through a side effect the written entries do not show
+  is measured as not reading it; such an op has no place in an inference graph.
+
+### Example
+
+```python
+graph = measure(steps, "done", [record_a, record_b])
+graph.nodes["classify"].reads          # {"image": Value("pre/bright.image", "image", Image)}
+graph.prune_sidecars()                 # ["level", "stamp", "done"] — nothing the outputs need
+[v.name for v in graph.input_values]   # ["source.image", "source.gain"]
+```
+
+### What you may change
+
+A cheaper measurement (ablation on the first record, the pruned graph verified on the rest) keeps the
+definition; a declaration-based shortcut does not and is refused. A new Tracer capability (per-step
+locations, a public snapshot API) replaces the `to_dict()` + `value()` reads here.
+
+---
+
+## 3. A subgraph step is inlined under the Tracer's names (`torpaido.frontend`, 2026-10-13)
+
+### Context
+
+A package graph nests: its preprocessing is a `Subgraph` whose inside is a steps file. The compiler must
+reach the inner steps (they are what gets lowered), and every refusal and every measurement must name a
+node the way the person debugging the graph sees it.
+
+### Decision
+
+`graph_from_steps` inlines a step whose op is a subgraph (duck-typed on the class marker `FLOW_SUBGRAPH`,
+as recordstream does): the inner steps become `<step>/<inner>` nodes — the names recordstream's `Tracer`
+gives them — the first inner step reading what the step reads, and the step itself stays as an IDENTITY
+node over its inner result so a later `from: <step>` resolves. An inner node inherits its step's
+location, suffixed `(step <name>)`, because a built subgraph keeps no trace of where its inner steps were
+written.
+
+### Consequences
+
+* `measure` matches Tracer rows to IR nodes by name; the container rows (the subgraph step) are skipped
+  and the identity node is pruned silently.
+* Nested subgraphs nest the prefix (`prep/inner/x`), as the Tracer does.
+
+### Example
+
+```python
+graph.nodes["pre/scale"].inputs   # ["start"]       — the subgraph's own input
+graph.nodes["pre"].op is None     # the container, an identity over "pre/bright"
+graph.nodes["pre/a"].where        # "model.yaml:5:9 (step pre/a)"
+```
+
+### What you may change
+
+If recordstream ever carries per-inner-step locations, read them instead of the suffix.
+
+---
+
+## 4. One lowering function per op class, by exact class, discovered by entry point (`torpaido.lowering.registry`, 2026-10-13)
+
+### Context
+
+The reference compiler gave every transform a hand-written TorchScript twin CLASS beside its numpy
+original (2 600 lines of twins in the core, twenty more files in the domain) through a `CompilableModule`
+interface or a `@compilable(CompilerClass)` decorator on the eager class; the twins drifted (a window's
+`periodic` flag diverged until a test caught it), and the eager classes had to know the compiler.
+
+### Decision
+
+A lowering is a plain function `(op, reads, ctx) -> writes`: the configured op (its settings read off
+it), `{entry: ItemValue}` for the entries the op was MEASURED to read, a `Context` (modules, buffers,
+constants), and `{entry: ItemValue}` for exactly the entries the op writes. `@lowers(OpClass)` registers
+it; the lookup is by EXACT class — a subclass may compute something else, and inheriting a lowering would
+leave only the parity check between it and a wrong artifact. `discover()` imports torpaido's own module
+and every module under the entry-point group `torpaido.lowerings` (confluid's `load_configurables`).
+A domain package ships its lowerings behind a `[compile]` extra; the dependency points domain → compiler
+(user decisions D1, D2 of 2026-10-13: torch as the lowering language; lowerings in the owning package).
+
+Refusals are located: a surviving node without a lowering names its `file:line:col`, what it writes and
+how to register one; a lowering writing other entries than its op is refused; `ctx.constant` refuses a
+varying value naming the input it depends on.
+
+### Consequences
+
+* The numpy op stays untouched and framework-free; parity (§8) is what holds the two faces together.
+* A pruned node needs no lowering — the training-only steps of a package never do.
+* The function runs twice per compile (eagerly, then under `torch.export`), so everything it registers
+  is keyed by name through the context.
+
+### Example
+
+```python
+@lowers(Magnitude)
+def lower_magnitude(op, reads, ctx):
+    spec = reads[op.field]
+    db = 20.0 * torch.log10(spec.data + op.eps)
+    return {op.field: spec.replace(data=db.to(torch.float32), scaling="db")}
+```
+
+### What you may change
+
+Which modules torpaido imports itself (`lowering/recordstream.py` holds recordstream's ops). Not the
+exact-class lookup, and not an inheritance of lowerings.
+
+---
+
+## 5. An item splits into parts and facts by one rule that serves compile time and run time (`torpaido.lowering.items`, 2026-10-13)
+
+### Context
+
+A record entry is a typed item (an `Image` with a layout, a `Label` with a vocabulary, a domain's region
+set); a tensor program knows tensors and constants. The reference compiler threaded a `Dict[str, Tensor]`
+side channel through every module and encoded label strings as zero-padded ASCII rows that the deployment
+runtime decoded by a convention written in a rulebook.
+
+### Decision
+
+An `ItemRule` says, per item type, how an item splits into **data parts** (arrays and number lists →
+tensors), **scalar parts** (numbers → a 0-d tensor when the envelope lets them vary, else constants) and
+**facts** (strings, `None`, flags, vocabularies → constants written in the manifest). The default is
+introspected from the type (dataclass field by field; `NDArrayItem` as data plus declared attributes;
+number; string); `@lowers_item(Type)` registers an override. The SAME rule derives the artifact's
+interface at compile time, feeds the engine in `CompiledPackage` (`split`) and writes the record back
+(`join`). Labels are `int64` indices; the vocabulary is `class_names.json`, copied into the folder.
+
+### Consequences
+
+* The manifest's `inputs:` / `outputs:` are `<entry>.<part>` ports with dtype, shape and item type; a
+  deployment runtime reads names, never conventions.
+* A non-numeric list (a list of strings) is a fact and must be constant across the samples; a domain
+  whose item needs another split registers a rule (a region set as one `[N, 4]` tensor).
+
+### Example
+
+```python
+parts, facts = item_rule(Image).split(image)      # {"data": <uint8 HWC>}, {"layout": "HWC"}
+item_rule(Label).split(Label(3))                  # {"value": 3}, {"classes": None}
+item_rule(Image).join({"data": array}, {"layout": "HWC"})
+```
+
+### What you may change
+
+Add introspected kinds (a `PIL` image, a `pathlib.Path` fact) and domain rules; never a second
+conversion path beside `split` / `join`.
+
+---
+
+## 6. `torch.export` is the hub; a backend writes files and gives a runner from the folder alone (`torpaido.program`, `torpaido.backends`, 2026-10-13)
+
+### Context
+
+The reference compiler scripted one hand-assembled `nn.Module` with `torch.jit.script`; TorchScript was
+baked into its interfaces, and a failure anywhere surfaced as a TorchScript error deep inside the module.
+
+### Decision
+
+`build_program` turns the measured, pruned graph into ONE `nn.Module` (`LoweredGraph`: inputs by port
+order, nodes in schedule order, each lowering run with the values it reads, outputs flattened to tensors),
+runs it eagerly on the first sample (modules and buffers register, writes are checked, per-node outputs
+kept for the bisect), and exports it with `torch.export` under the dynamic shapes the envelope states.
+A `Backend` takes the `Program` and writes files (`TorchScript`: `torch.jit.trace` of the exported
+module → `model.pt`; `TorchExport`: `torch.export.save` → `program.pt2`) and gives a `Runner` from the
+folder alone: the port names travel inside the artifact as an extra file. Backends are
+`@configurable(category="compiler_backend")`; `backend_named` resolves a manifest's `backend:`.
+TorchScript came first (user decision D4) because the deployment runtime that exists loads it.
+
+### Consequences
+
+* One lowering language, N artifacts; a backend never sees a lowering or a record.
+* TorchScript is in maintenance upstream; its API warnings are silenced inside the backend, where the
+  user's choice of it is explicit.
+* An ONNX backend is `torch.onnx.export(program, dynamo=True)` on the same `Program` (`TASKS.md`).
+
+### Example
+
+```python
+program = build_program(graph, samples, envelope={"image.data": "varies"})
+files = TorchScript().compile(program, folder)          # [folder / "model.pt"]
+runner = TorchScript().runner(folder, ["model.pt"])     # knows the port order from the artifact
+runner({"image.data": array})                           # {"scores.data": ..., "label.value": ...}
+```
+
+### What you may change
+
+New backends behind their own extras; `LoweredGraph.forward` stays a varargs tensor interface (a C++
+runtime wants positional tensors).
+
+---
+
+## 7. The envelope fixes or frees input parts, and the manifest states what was fixed (`torpaido.program`, 2026-10-13)
+
+### Context
+
+A graph may resolve a setting per record (an FFT length from the sample rate); an exported program cannot.
+The reference compiler read such values from its side channel at run time, or baked them silently.
+
+### Decision
+
+`envelope: {<entry>.<part>: varies | value}`. `varies` makes every dimension of a data part dynamic
+(`Dim.AUTO`) or a scalar part a 0-d input tensor; a value fixes the part, checked against every sample
+and written under `specialized`; an unnamed part is fixed at the samples' value, which every sample must
+share — except a tensor dimension the samples disagree on, which is dynamic (measured). Output
+dimensions are measured over the samples; output facts and constant parts land under `constants`.
+A lowering that needs a constant from a varying part is refused naming the dependency and the two fixes.
+
+### Consequences
+
+* Nothing is specialized silently: `compiled.yaml` says which sample rate, layout and band the artifact
+  answers for, and `CompiledPackage` refuses a record outside it.
+* `varies` on a single sample's output cannot be observed as dynamic in the manifest (there is one
+  shape); give the compiler samples that differ.
+
+### Example
+
+```yaml
+envelope: {signal.samplerate: 100e6, signal.data: varies}
+# compiled.yaml → inputs: {signal.data: {shape: [null], ...}}  specialized: {signal.samplerate: 100000000.0}
+```
+
+### What you may change
+
+A per-dimension spelling (`image.data: [varies, varies, 3]`) if a package needs it; the rule that an
+unnamed part is fixed and stated.
+
+---
+
+## 8. Parity on real records, bisected to the first disagreeing node; the compiled folder stands alone (`torpaido.compile`, `torpaido.compiled`, `torpaido.manifest`, 2026-10-13)
+
+### Context
+
+The reference compiler verified on synthetic zero tensors of declared sizes and compared the final tensor
+with `allclose`; its output was one `.pt` whose contents the consumer had to know, with `lexicon.json`
+beside it that nobody read at deployment.
+
+### Decision
+
+`CompilePackage` runs every sample record through the Python graph and the artifact and compares each
+output entry part by part (`parity.compare`: arrays within `atol`/`rtol`, integers and facts exactly, a
+per-entry tolerance winning). A failure writes `parity.yaml` into `<name>.partial/`, names the FIRST node
+whose eager torch outputs disagree with its op's Tracer snapshot (the bisect), and the folder is never
+moved into place. The folder is STANDALONE (user ruling D3, 2026-10-13): `compiled.yaml` (format 1,
+generator header), the backend's files, a copy of `class_names.json`, `parity.yaml`; the package is named
+only as provenance (`source.package`, `source.package_sha256`). `CompiledPackage(path=<folder>)` runs
+it after the package is gone, refusing a record outside the envelope by part and both values. The
+default location is `<package>/compiled/<name>/`; replacing the package deletes it (it was of the old
+weights).
+
+### Consequences
+
+* A compile is a verified claim: what landed in the folder answered as the Python graph did on every
+  sample record.
+* A domain item needing a tolerant comparison (boxes matched by IoU) registers it with its rule
+  (`TASKS.md`); the default is part-wise closeness.
+
+### Example
+
+```
+CompilePackage: parity failed on record 1: scores.data max |a - b| = 139.4 (atol 1e-05, rtol 0.0001);
+the first node that disagrees is 'pre/bright' — the report is …/compiled/ts.partial/parity.yaml
+```
+
+### What you may change
+
+Fields a reader may ignore in `compiled.yaml`; a transport form (a zip of the folder). Never a folder
+that reads the package again, and never a move into place before parity passed.
