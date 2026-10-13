@@ -163,6 +163,13 @@ program has to hold: `ctx.module(name, nn_module)` registers a model (its weight
 artifact), `ctx.buffer(name, factory)` a tensor made once (a window), `ctx.constant(value, name)` a
 Python number — refused when the envelope lets the value vary.
 
+An op that HOLDS a model (a detection op holding a predictor) lowers through the model's own lowering, registered
+with `@lowers_model(PredictorClass)`; the op's lowering says which tensors it hands over and expects back, so a
+predictor from one package and a detection op from another meet on that contract.
+
+A compile may change the package's graph the way the package op does — `overrides: {flow.detect.op.device: cpu,
+flow.detect.op.masks_output: ""}` — and the manifest records what was compiled.
+
 Torpaido ships the lowerings of recordstream's own ops: `Scale`, `ToType`, `ToTensor`, `RenameField`,
 `DropField`, `PutField` and `RecordContract`.
 
