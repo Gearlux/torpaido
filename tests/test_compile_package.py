@@ -261,3 +261,15 @@ def test_an_op_that_has_run_pickles_without_its_engine(package: Path, samples: L
 
     assert clone._runner is None
     assert np.allclose(clone(sample_record())["scores"], expected["scores"])
+
+
+def test_overrides_reach_the_package_s_graph_and_are_written_in_the_manifest(
+    package: Path, samples: List[Record]
+) -> None:
+    out = _compile(package, samples, overrides={"flow.classify.op.output": "probs"})
+    info = read_compiled(out)
+
+    assert info["overrides"] == {"flow.classify.op.output": "probs"}
+    assert list(info["outputs"]) == ["probs.data", "label.value"]
+    answer = CompiledPackage(path=str(out))(sample_record())
+    assert "probs" in answer and "scores" not in answer
