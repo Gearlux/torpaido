@@ -350,40 +350,64 @@ runtime wants positional tensors).
 
 ---
 
-## 7. The envelope fixes or frees input parts, and the manifest states what was fixed (`torpaido.program`, 2026-10-13)
+## 7. The interface is what the lowerings read; the envelope fixes or frees among it, and the manifest states what was fixed (`torpaido.program`, 2026-10-13)
 
 ### Context
 
 A graph may resolve a setting per record (an FFT length from the sample rate); an exported program cannot.
-The reference compiler read such values from its side channel at run time, or baked them silently.
+The reference compiler read such values from its side channel at run time, or baked them silently. A
+domain's capture item also carries fields derived from the samples (a duration, SNR measurements, a
+modulation name) that no step of the inference graph reads; a first version of this compiler made every
+field of an input entry a port and demanded the samples agree on each — a compile of a real package
+stopped on two captures 24.9 ms and 21.2 ms long, over a `duration` nothing read (user decision A,
+2026-10-13: measure the reads, and let a read scalar the samples disagree on vary).
 
 ### Decision
 
-`envelope: {<entry>.<part>: varies | value}`. `varies` makes every dimension of a data part dynamic
+The interface is MEASURED: a probe forward on the first sample hands every input entry's parts and facts
+to the lowerings through recording mappings (`Watched`: a read, a `get`, a walk or a `dict()` copy counts,
+`in` does not), and only what some lowering looked at enters the interface. Among that,
+`envelope: {<entry>.<part>: varies | value}`: `varies` makes every dimension of a data part dynamic
 (`Dim.AUTO`) or a scalar part a 0-d input tensor; a value fixes the part, checked against every sample
-and written under `specialized`; an unnamed part is fixed at the samples' value, which every sample must
-share — except a tensor dimension the samples disagree on, which is dynamic (measured). Output
-dimensions are measured over the samples; output facts and constant parts land under `constants`.
-A lowering that needs a constant from a varying part is refused naming the dependency and the two fixes.
+and written under `specialized`; an unnamed part follows the samples — a value they share is fixed and
+stated, a scalar or a tensor dimension they disagree on is dynamic. A read fact (a layout, a scaling) is
+always fixed and the samples must share it. Output dimensions are measured over the samples; output facts
+and constant parts land under `constants`. A lowering that needs a constant from a varying part is refused
+naming the dependency and the two fixes.
 
 ### Consequences
 
-* Nothing is specialized silently: `compiled.yaml` says which sample rate, layout and band the artifact
-  answers for, and `CompiledPackage` refuses a record outside it.
+* The manifest states exactly what the artifact assumes and nothing more: a capture's unread fields
+  never appear, `CompiledPackage` never checks them, and samples may differ there.
+* Nothing read is specialized silently: `compiled.yaml` says which sample rate, layout and band the
+  artifact answers for, and `CompiledPackage` refuses a record outside it.
+* The envelope is for intent the samples cannot show: `varies` on a part the samples happen to share, or
+  a value to pin. An envelope key naming an unread part is refused listing what is read.
 * `varies` on a single sample's output cannot be observed as dynamic in the manifest (there is one
-  shape); give the compiler samples that differ.
+  shape); give the compiler samples that differ. The probe costs one extra lowering pass on the first
+  sample (one model call).
 
 ### Example
 
 ```yaml
-envelope: {signal.samplerate: 100e6, signal.data: varies}
-# compiled.yaml → inputs: {signal.data: {shape: [null], ...}}  specialized: {signal.samplerate: 100000000.0}
+# a Signal has data, samplerate, center_freq, duration, bandwidth, snr_db, …; the spectrogram lowering reads
+# data, samplerate and center_freq. Samples: two captures of different length, rate and centre.
+envelope: {input.data: varies}
+# compiled.yaml → inputs: {input.data: {shape: [null]}, input.samplerate: {shape: []}, input.center_freq: {shape: []}}
+#                 specialized: {}        — duration, bandwidth, snr_db … are nobody's business
+```
+
+```python
+reads["clip"].parts["rate"]          # seen: clip.rate enters the interface
+"rate" in reads["clip"].parts        # not a look
+clip.replace(data=scaled)            # a dict() copy: every part the item carries forward is seen
 ```
 
 ### What you may change
 
-A per-dimension spelling (`image.data: [varies, varies, 3]`) if a package needs it; the rule that an
-unnamed part is fixed and stated.
+A per-dimension spelling (`image.data: [varies, varies, 3]`) if a package needs it; the rule that a shared
+read value is fixed and stated. Never a declared list of "interface fields" per item type — the reads
+are measured, like the dataflow (record 2).
 
 ---
 

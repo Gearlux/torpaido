@@ -100,17 +100,21 @@ has 61440000.0 — compile with the envelope letting it vary (signal.samplerate:
 
 ## The envelope: what is fixed, what may vary
 
-`envelope:` names input parts as `<entry>.<part>`:
+The interface is what the lowered steps READ: the compiler runs the lowerings once on the first sample
+through a recording view of each input entry, and a field no step looked at — a capture's derived
+duration, its SNR fields, a source name — is neither an input nor fixed, whatever the samples say about
+it. For the fields that are read, `envelope:` names them as `<entry>.<part>`:
 
 | the envelope says | the artifact |
 | --- | --- |
 | `signal.data: varies` | every dimension of that tensor is dynamic |
 | `signal.samplerate: varies` | the scalar becomes an input tensor (0-d, `float64`) |
-| `signal.samplerate: 100e6` | fixed: baked in and written under `specialized:`; a record with another value is refused |
-| *(not named)* | fixed at the samples' value, which every sample must share — except a tensor dimension the samples **disagree** on, which is dynamic |
+| `signal.samplerate: 100e6` | fixed: baked in and written under `specialized:`; a sample or a record with another value is refused |
+| *(not named)* | what the samples do: a value they share is fixed and written under `specialized:`; a scalar or a tensor dimension they **disagree** on is dynamic |
 
-So nothing is silent: `compiled.yaml` says which sample rate, which layout, which band the artifact
-answers for. A step whose lowering needs a constant that the envelope lets vary is refused:
+A fact a step reads (a layout, a scaling name) is always fixed, so the samples must share it. Nothing is
+silent: `compiled.yaml` says which sample rate, which layout, which band the artifact answers for, and
+only that. A step whose lowering needs a constant that the envelope lets vary is refused:
 
 ```
 torpaido: step 'raster/spectrogram' (mydomain.processing.Spectrogram) needs 'fft_size' as a constant, but it

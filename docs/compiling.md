@@ -85,24 +85,31 @@ op.
 
 ## 4. The envelope
 
-An input part is `<entry>.<part>` — `signal.data`, `signal.samplerate`, `image.layout`.
+An input part is `<entry>.<part>` — `signal.data`, `signal.samplerate`, `image.layout`. Only the parts
+and facts some lowering READS are the artifact's: a probe run on the first sample hands each lowering the
+input entries through a recording view, and what no lowering looked at (a capture's derived `duration`,
+its SNR fields, a source name) is neither an input nor fixed — two samples may differ there freely, and
+`CompiledPackage` never checks it. For the read parts:
 
 | the envelope says | the artifact |
 | --- | --- |
 | `signal.data: varies` | every dimension of that tensor is dynamic |
 | `signal.samplerate: varies` | the scalar is an input tensor (0-d, `float64` / `int64`) |
-| `signal.samplerate: 100e6` | fixed: baked in, under `specialized`; checked against every sample |
-| *(not named)* | fixed at the samples' value, which every sample must share; a tensor dimension the samples disagree on is dynamic |
+| `signal.samplerate: 100e6` | fixed: baked in, under `specialized`; a sample with another value is refused |
+| *(not named)* | what the samples do: a value they share is fixed, under `specialized`; a scalar, or a tensor dimension, they disagree on is dynamic |
 
-Facts (a layout, a scaling name) are always fixed; the samples must agree on them.
+Facts (a layout, a scaling name) are always fixed; the samples must agree on the ones that are read.
 
 Refusals, with what to do:
 
 ```
-torpaido: the input gain.value is fixed, but the samples disagree: record 1 has 2.0 and record 2 has 3.0
-  Let it vary (envelope: gain.value: varies) or compile from samples that agree.
+torpaido: the envelope fixes gain.value to 2.0, but record 2 has 3.0
+
+torpaido: the input image.layout is a fact of the artifact, but the samples disagree: record 1 has 'HWC' and record 2 has 'CHW'
 
 torpaido: the envelope names 'picture.data', which is not an input part (gain.value, image.data, image.layout)
+
+torpaido: the envelope names 'clip.length_s', which no step of the artifact reads (it reads clip.data, clip.kind, clip.rate)
 
 torpaido: step 'tile' (mydomain.ops.Tile) needs 'count' as a constant, but it depends on count.value, which
 the envelope lets vary at cfg/model.yaml:3:3

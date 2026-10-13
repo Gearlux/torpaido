@@ -3,14 +3,19 @@
 :func:`build_program` takes a measured, pruned graph and the sample records and:
 
 1. finds a lowering for every surviving op node (a missing one is refused with the step's location);
-2. derives the INTERFACE from the graph's input values and the samples — each input entry split by its
-   item rule into data parts (tensor inputs; a dimension that differs between the samples, or that the
-   envelope lets vary, is dynamic), scalar parts (a tensor input when the envelope says ``varies``, else
-   a constant written under ``specialized``) and facts (constants, under ``specialized``);
-3. runs every lowering once, eagerly, on the first sample — the modules and buffers register, each
+2. measures what the lowerings READ of each input entry: one probe run on the first sample hands every
+   lowering the entry's parts and facts through a recording mapping; a part or fact no lowering looked at
+   is not part of the interface (a capture's derived duration, its SNR fields), whatever the samples say
+   about it;
+3. derives the INTERFACE from the read parts and the samples — each input entry split by its item rule
+   into data parts (tensor inputs; a dimension that differs between the samples, or that the envelope lets
+   vary, is dynamic), scalar parts (a 0-d tensor input when the envelope says ``varies`` OR the samples
+   disagree; else a constant written under ``specialized``) and facts (constants under ``specialized``,
+   which the samples must share);
+4. runs every lowering once more, eagerly, on every sample — the modules and buffers register, each
    lowering's writes are checked against the op's measured writes, and the per-node outputs are kept for
    the parity bisect;
-4. exports the module with ``torch.export`` under the dynamic shapes the interface states.
+5. exports the module with ``torch.export`` under the dynamic shapes the interface states.
 
 The output ports are read off the eager outputs: dtype from the tensor, a dimension dynamic when it
 differs between the samples.
@@ -18,7 +23,7 @@ differs between the samples.
 
 import dataclasses
 import math
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 import numpy as np
 import torch
@@ -28,7 +33,7 @@ from torch.export import Dim, ExportedProgram
 
 from torpaido.ir import Graph, Node, Value
 from torpaido.lowering.context import Context
-from torpaido.lowering.items import ItemValue, is_number, item_rule, to_python
+from torpaido.lowering.items import ItemValue, Watched, is_number, item_rule, to_python
 from torpaido.lowering.registry import GROUP, Lowering, discover, lowering_for
 
 __all__ = ["Interface", "Port", "Program", "build_program", "dotted", "interface_arrays", "resolve_dotted"]
@@ -168,6 +173,8 @@ class LoweredGraph(nn.Module):
         #: Filled by every forward: node -> the values its lowering wrote (the eager pass keeps the reference).
         self.node_outputs: Dict[str, Dict[str, ItemValue]] = {}
         self.output_values: List[ItemValue] = []
+        #: Filled by every forward: input value name -> the parts and facts some lowering looked at.
+        self.reads: Dict[str, Set[str]] = {}
 
     def forward(self, *tensors: Tensor) -> Tuple[Tensor, ...]:
         live: Dict[str, ItemValue] = {}
@@ -181,7 +188,8 @@ class LoweredGraph(nn.Module):
                 if tensor.ndim == 0:
                     self._origins[id(tensor)] = f"{spec.value.entry}.{part}"
             parts.update(spec.constant_parts)
-            live[spec.value.name] = ItemValue(spec.value.item, parts, spec.facts)
+            seen = self.reads.setdefault(spec.value.name, set())
+            live[spec.value.name] = ItemValue(spec.value.item, Watched(parts, seen), Watched(spec.facts, seen))
         self.node_outputs = {}
         for node in self._nodes:
             reads = {entry: live[value.name] for entry, value in node.reads.items()}
@@ -245,37 +253,53 @@ def _no_lowering(node: Node) -> ValueError:
 
 
 def _input_specs(
-    graph: Graph, samples: List[Record], envelope: Dict[str, Any]
+    graph: Graph, samples: List[Record], envelope: Dict[str, Any], reads: Optional[Mapping[str, Set[str]]]
 ) -> Tuple[List[_InputSpec], Dict[str, Any]]:
-    """The input specs and the ``specialized`` map, from the samples and the envelope; refusals for disagreements."""
+    """The input specs and the ``specialized`` map, from the samples, the envelope and what the lowerings read.
+
+    ``reads`` is ``None`` for the PROBE pass: every part enters, scalars and facts as the first sample has them, no
+    agreement demanded — the pass only measures which parts the lowerings look at. With ``reads`` (input value name →
+    the parts and facts seen), only those enter: a data part as a tensor (a dimension the samples disagree on, or
+    that the envelope frees, dynamic); a scalar part as a 0-d tensor when the envelope says ``varies`` or the samples
+    disagree, else fixed at their value; a fact fixed, the samples having to agree. An envelope value is checked
+    against every sample. Refusals name the part and both values.
+    """
     specs: List[_InputSpec] = []
     specialized: Dict[str, Any] = {}
     named: List[str] = []
+    read_names: List[str] = []
     for value in graph.input_values:
         spec = _InputSpec(value)
         rule = item_rule(value.item)
         splits = [rule.split(record[value.entry]) for record in samples]
         parts0, facts0 = splits[0]
+        seen = None if reads is None else reads.get(value.name, set())
         for part, held in parts0.items():
             name = f"{value.entry}.{part}"
             named.append(name)
+            if seen is not None and part not in seen:
+                continue
+            read_names.append(name)
             wish = envelope.get(name)
             if is_number(held):
-                if wish == VARIES:
+                if seen is None:  # the probe: the first sample's value, as a constant
+                    spec.constant_parts[part] = to_python(held)
+                    continue
+                if wish is not None and wish != VARIES:
+                    for ordinal, (parts, _) in enumerate(splits, 1):
+                        if not same_number(wish, parts.get(part)):
+                            raise ValueError(
+                                f"torpaido: the envelope fixes {name} to {wish!r}, but record {ordinal} has "
+                                f"{to_python(parts.get(part))!r}"
+                            )
+                    spec.constant_parts[part] = to_python(held)
+                    specialized[name] = to_python(held)
+                    continue
+                agree = all(same_number(parts.get(part), held) for parts, _ in splits[1:])
+                if wish == VARIES or not agree:
                     spec.tensor_parts.append(part)
                     spec.dynamic[part] = []
                     continue
-                for ordinal, (parts, _) in enumerate(splits[1:], 2):
-                    if not same_number(parts[part], held):
-                        raise ValueError(
-                            f"torpaido: the input {name} is fixed, but the samples disagree: record 1 has "
-                            f"{to_python(held)!r} and record {ordinal} has {to_python(parts[part])!r}\n"
-                            f"  Let it vary (envelope: {name}: varies) or compile from samples that agree."
-                        )
-                if wish is not None and not same_number(wish, held):
-                    raise ValueError(
-                        f"torpaido: the envelope fixes {name} to {wish!r}, but record 1 has {to_python(held)!r}"
-                    )
                 spec.constant_parts[part] = to_python(held)
                 specialized[name] = to_python(held)
             else:
@@ -295,6 +319,12 @@ def _input_specs(
         for fact, held in facts0.items():
             name = f"{value.entry}.{fact}"
             named.append(name)
+            if seen is not None and fact not in seen:
+                continue
+            read_names.append(name)
+            if seen is None:
+                spec.facts[fact] = held
+                continue
             for ordinal, (_, facts) in enumerate(splits[1:], 2):
                 if facts.get(fact) != held:
                     raise ValueError(
@@ -307,12 +337,27 @@ def _input_specs(
             spec.facts[fact] = held
             specialized[name] = held
         specs.append(spec)
-    unknown = [name for name in envelope if name not in named]
-    if unknown:
-        raise ValueError(
-            f"torpaido: the envelope names {unknown[0]!r}, which is not an input part ({', '.join(sorted(named))})"
-        )
+    if reads is not None:
+        for key in envelope:
+            if key not in named:
+                raise ValueError(
+                    f"torpaido: the envelope names {key!r}, which is not an input part ({', '.join(sorted(named))})"
+                )
+            if key not in read_names:
+                raise ValueError(
+                    f"torpaido: the envelope names {key!r}, which no step of the artifact reads "
+                    f"(it reads {', '.join(sorted(read_names))})"
+                )
     return specs, specialized
+
+
+def _probe_tensors(specs: List[_InputSpec], record: Record) -> Tuple[Tensor, ...]:
+    """The probe pass's input tensors for ``record``: every tensor part of every spec, in order, unchecked."""
+    tensors: List[Tensor] = []
+    for spec in specs:
+        parts, _ = item_rule(spec.value.item).split(record[spec.value.entry])
+        tensors.extend(torch.as_tensor(np.asarray(parts[part])) for part in spec.tensor_parts)
+    return tuple(tensors)
 
 
 def same_number(a: Any, b: Any) -> bool:
@@ -361,7 +406,13 @@ def build_program(graph: Graph, samples: Sequence[Record], envelope: Optional[Ma
             raise _no_lowering(node)
         lowerings[node.name] = lowering
     wish = {str(key): value for key, value in (envelope or {}).items()}
-    specs, specialized = _input_specs(graph, records, wish)
+    # The probe: every part enters, and the recording mappings say which ones the lowerings looked at.
+    probe_specs, _ = _input_specs(graph, records, wish, None)
+    probe = LoweredGraph(nodes, lowerings, probe_specs, graph.output_values)
+    probe.eval()
+    with torch.no_grad():
+        probe(*_probe_tensors(probe_specs, records[0]))
+    specs, specialized = _input_specs(graph, records, wish, probe.reads)
     module = LoweredGraph(nodes, lowerings, specs, graph.output_values)
     module.eval()
 

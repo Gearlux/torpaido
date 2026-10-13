@@ -88,14 +88,24 @@ runtime branches, a draw's refusal by name — `TASKS.md`.
   travel INSIDE the artifact. Backends are `@configurable(category="compiler_backend")`;
   `backend_named` resolves a manifest's `backend:`. §6.
   (`tests/test_program.py::test_a_backend_reproduces_the_python_graph_on_a_picture_of_another_size`)
-- **The envelope decides what is fixed.** `<entry>.<part>: varies` = every dimension dynamic (a data
-  part) or a 0-d input tensor (a scalar); a value = fixed and `specialized`; unnamed = fixed at the
-  samples' value (they must agree) — except a tensor dimension the samples disagree on, which is
-  dynamic. An envelope key naming no input part is refused listing them. Output dimensions are
-  measured over the samples; output facts and constant parts land under `constants`. §7.
-  (`tests/test_program.py::test_the_interface_lists_the_tensor_ports_and_specializes_the_rest`,
-  `::test_a_fixed_input_must_agree_across_the_samples`,
-  `::test_an_envelope_naming_no_input_part_is_refused_listing_them`)
+- **The interface is what the lowerings READ, measured; the envelope decides what is fixed among it**
+  (2026-10-13, user decision A). A probe forward on the first sample hands every input entry's parts
+  and facts to the lowerings as `Watched` mappings (`lowering.items`; a read, a `get`, a walk or a
+  `dict()` copy — `ItemValue.replace` — counts, `in` does not), and `_input_specs` keeps only what was
+  seen: a field no lowering looked at (a capture's derived `duration`, its SNR fields) is neither an
+  input nor `specialized`, and samples may differ there. Among the read parts: `<entry>.<part>: varies`
+  = every dimension dynamic (a data part) or a 0-d input tensor (a scalar); a value = fixed and
+  `specialized`, every sample checked; unnamed = what the samples do — shared → fixed, disagreeing →
+  dynamic (a scalar as a 0-d input, as a tensor dimension already was). A read FACT must be shared.
+  An envelope key naming no input part is refused listing them; one naming an unread part is refused
+  listing what is read. Output dimensions are measured over the samples; output facts and constant
+  parts land under `constants`. Never demand agreement on a field nobody reads, and never make an
+  unread field an input. §7.
+  (`tests/test_program.py::test_an_input_field_no_step_reads_is_not_part_of_the_interface`,
+  `::test_a_read_scalar_the_samples_disagree_on_varies_without_being_named`,
+  `::test_a_read_scalar_the_samples_disagree_on_is_an_input_and_a_read_fact_is_refused`,
+  `::test_an_envelope_value_still_refuses_a_sample_that_disagrees_with_it`,
+  `::test_an_envelope_naming_a_field_no_step_reads_is_refused_listing_what_is_read`)
 - **Parity decides the compile.** Every sample record through the Python graph (`run_steps_multi`)
   and the artifact; `parity.compare` per entry by its item rule — part by part (arrays within
   `atol`/`rtol`, integers by whole steps, facts exact; a per-entry tolerance wins), or the rule's own
