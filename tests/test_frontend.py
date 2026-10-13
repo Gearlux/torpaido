@@ -130,3 +130,40 @@ class TestErrors:
         steps, outputs = _steps({"a": _Op()})
         graph = graph_from_steps(steps, outputs, attributes={"a": {"backend": "onnx"}})
         assert graph.nodes["a"].attributes == {"backend": "onnx"}
+
+
+class TestSubgraphs:
+    """A subgraph step is INLINED: its inner steps become ``<step>/<inner>`` nodes — the names the Tracer uses."""
+
+    def _graph(self, **kwargs: Any) -> Any:
+        from recordstream.flow import Subgraph
+
+        inner = Subgraph(steps={"a": {"op": _Op("a")}, "b": {"op": _Other("b")}})
+        steps, outputs = _steps(
+            {"start": _Op(), "pre": {"op": inner, "from": "start"}, "after": {"op": _Op(), "from": "pre"}}
+        )
+        return graph_from_steps(steps, outputs, **kwargs)
+
+    def test_the_inner_steps_become_prefixed_nodes_reading_the_subgraph_input(self) -> None:
+        graph = self._graph()
+        assert graph.nodes["pre/a"].inputs == ["start"]
+        assert graph.nodes["pre/b"].inputs == ["pre/a"]
+        assert graph.nodes["pre/b"].op_type == "_Other"
+
+    def test_the_subgraph_step_itself_is_an_identity_over_its_result(self) -> None:
+        graph = self._graph()
+        assert graph.nodes["pre"].op is None
+        assert graph.nodes["pre"].inputs == ["pre/b"]
+        assert graph.nodes["after"].inputs == ["pre"]
+
+    def test_the_live_op_rides_on_its_node(self) -> None:
+        graph = self._graph()
+        assert graph.nodes["pre/a"].op.tag == "a"
+        assert graph.nodes["start"].op_type == "_Op"
+
+    def test_a_location_is_stamped_on_the_step_and_inherited_by_its_inner_nodes(self) -> None:
+        graph = self._graph(locations={"pre": "model.yaml:5:9", "start": "model.yaml:2:3"})
+        assert graph.nodes["start"].where == "model.yaml:2:3"
+        assert graph.nodes["pre"].where == "model.yaml:5:9"
+        assert graph.nodes["pre/a"].where == "model.yaml:5:9 (step pre/a)"
+        assert graph.nodes["after"].where == ""
