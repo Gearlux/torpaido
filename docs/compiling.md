@@ -130,6 +130,19 @@ torpaido: step 'fickle' reads ['level', 'tag'] on record 1 and ['level'] on reco
 has no static graph at model.yaml:7:3
 ```
 
+A step that holds a model (a detector holding a predictor) lowers through the model's own lowering, which
+its package lists under the entry-point group `torpaido.lowerings`. When none is registered the refusal says
+what the group did load, so a package installed before it declared its entry point — the lowering exists
+and is not found — explains itself:
+
+```
+torpaido: step 'detect' (DetectionModelPredict) holds a mydomain.predictor.Predictor, which has no model lowering.
+  Lowering modules found under the entry point group 'torpaido.lowerings': signals (signals.lowering).
+  None comes from 'mydomain', the package that defines it: install that package with its lowering extra, or
+  reinstall it so its entry point is registered (an editable install registers entry points at install time).
+  Or register one with @lowers_model(Predictor).
+```
+
 ## 6. Writing a lowering
 
 ```python
