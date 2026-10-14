@@ -54,10 +54,16 @@ runtime branches, a draw's refusal by name — `TASKS.md`.
 - **A lowering is ONE function per op class**, `(op, reads, ctx) -> writes`, registered with
   `@lowers(OpClass)` by EXACT class (a subclass inherits nothing), found by `lowering_for`, discovered
   by `discover()` (torpaido's own module, then the entry-point group `torpaido.lowerings` through
-  confluid's `load_configurables`). A class has exactly one. §4.
+  confluid's `load_configurables`). A class has exactly one. §4. **`discover()` keeps what the group gave**
+  (`DISCOVERED`: entry name → module, or the exception its import raised), and a held object without a
+  model lowering is refused through `no_model_lowering(held, where)`: the modules found, the entries that
+  failed to import, and — when none comes from the package defining the object — the reinstall (2026-10-13:
+  a package installed before it declared its entry point looked like a lowering never written). A domain's
+  refusal for a held model calls it; never write the bare "has no model lowering" line.
   (`tests/test_lowering.py::test_a_lowering_is_found_by_the_exact_op_class`,
   `::test_registering_a_second_lowering_for_a_class_is_refused`,
-  `::test_discover_imports_the_entry_point_group_and_torpaido_s_own_lowerings`)
+  `::test_discover_imports_the_entry_point_group_and_torpaido_s_own_lowerings`,
+  `::test_a_missing_model_lowering_s_refusal_says_what_was_found_and_what_to_do`)
 - A surviving node without a lowering is refused at its `file:line:col`, naming what it writes and
   how to register one; a pruned node needs none. A lowering's writes must equal the op's measured
   writes. A lowering needing a constant calls `ctx.constant`, which refuses a varying value naming

@@ -220,6 +220,10 @@ varying value naming the input it depends on.
 * A pruned node needs no lowering — the training-only steps of a package never do.
 * The function runs twice per compile (eagerly, then under `torch.export`), so everything it registers
   is keyed by name through the context.
+* Discovery keeps its evidence: `discover()` records what the entry-point group gave (`DISCOVERED`, each
+  entry's module or the exception its import raised), and a held object without a lowering is refused
+  with that list — a lowering that exists but is not registered (a package installed before it declared
+  its entry point) must not look like one never written (2026-10-13).
 
 ### Example
 

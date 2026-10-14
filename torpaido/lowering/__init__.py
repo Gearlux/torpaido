@@ -26,6 +26,7 @@ from torpaido.lowering.registry import (
     lowers,
     lowers_model,
     model_lowering_for,
+    no_model_lowering,
 )
 
 if TYPE_CHECKING:
@@ -50,6 +51,7 @@ __all__ = [
     "lowers_item",
     "lowers_model",
     "model_lowering_for",
+    "no_model_lowering",
     "to_python",
 ]
 
