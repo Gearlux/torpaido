@@ -8,7 +8,7 @@ dependencies = [
     "loggair>=0.1.0",
     # recordstream and matrainer ship as pre-releases (0.1.0aN). Under PEP 440 a plain `>=0.1.0`
     # EXCLUDES every pre-release of 0.1.0, so it would resolve to nothing.
-    "recordstream>=0.1.0a1",
+    "recordstream>=0.1.0a3",
     # The unit a compile takes is a matrainer MODEL PACKAGE (its graph, weights and class names);
     # matrainer's core is framework-free, so this costs no framework.
     "matrainer>=0.1.0a1",
