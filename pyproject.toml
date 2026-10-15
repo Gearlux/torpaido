@@ -27,8 +27,14 @@ requires-python = ">=3.12"
 # TorchScript / `.pt2` backends. `[tool.aisland] frameworks` below names it, so the workspace's
 # framework selection installs it.
 torch = ["torch"]
+# The ONNX backend (`torpaido.backends.Onnx`): the dynamo exporter needs onnxscript, the checker onnx, and
+# onnxruntime runs the file — for parity at compile time and in CompiledPackage. A backend, not a framework:
+# the compile config chooses it, so it is not under `[tool.aisland] frameworks`.
+onnx = ["onnx", "onnxruntime", "onnxscript"]
 dev = [
     "torpaido[torch]",
+    # The ONNX tests skip without the extra; dev carries it so the workspace venv and the generated CI run them.
+    "torpaido[onnx]",
     "black>=24.0.0,<25.0.0",
     "isort>=5.13.0,<6.0.0",
     "flake8>=6.0.0,<8.0.0",

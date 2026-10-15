@@ -319,8 +319,10 @@ order, nodes in schedule order, each lowering run with the values it reads, outp
 runs it eagerly on the first sample (modules and buffers register, writes are checked, per-node outputs
 kept for the bisect), and exports it with `torch.export` under the dynamic shapes the envelope states.
 A `Backend` takes the `Program` and writes files (`TorchScript`: `torch.jit.trace` of the LOWERED
-module → `model.pt`; `TorchExport`: `torch.export.save` → `program.pt2`) and gives a `Runner` from the
-folder alone: the port names travel inside the artifact as an extra file. The TorchScript trace is of the
+module → `model.pt`; `TorchExport`: `torch.export.save` → `program.pt2`; `Onnx`:
+`torch.onnx.export(program.exported, dynamo=True)` → `model.onnx`, run by onnxruntime, added 2026-10-15) and
+gives a `Runner` from the folder alone: the port names travel inside the artifact — an extra file of the
+torch forms, the ONNX graph's own input and output names. The TorchScript trace is of the
 eager lowered module, not of the exported program's module (changed 2026-10-13): export turns a size a
 lowering reads off a tensor — a picture as tall as its raster, resized to a fixed width — into a
 `sym_size.int` node, and `torch.jit.trace` bakes that node's int to the trace sample's value, so the
@@ -336,7 +338,15 @@ TorchScript came first (user decision D4) because the deployment runtime that ex
 * One lowering language, N artifacts; a backend never sees a lowering or a record.
 * TorchScript is in maintenance upstream; its API warnings are silenced inside the backend, where the
   user's choice of it is explicit.
-* An ONNX backend is `torch.onnx.export(program, dynamo=True)` on the same `Program` (`TASKS.md`).
+* The ONNX backend costs no second lowering: the same exported program, under the port names, is one
+  `model.onnx` (the weights inline, `onnx.checker`'s full check, opset 18 and up — a lower `opset_version`
+  is refused rather than raised silently, since the exporter wrote 18 when asked for 17). The exported
+  program's `sym_size` becomes a `Shape` node, so a raster-following height stays dynamic there too
+  (measured 2026-10-15: 30, 34, 40 and 7 rows in and out). A dimension `varies` freed and export then fixed
+  (a channel count a convolution needs) is written under the exporter's name for it (`[s95, s85, "3"]`), not
+  as a size; the manifest stays the contract. The `[onnx]` extra's packages are checked by name before any
+  import, so a missing one is a refusal naming `torpaido[onnx]`, never a `ModuleNotFoundError` from inside
+  torch.
 
 ### Example
 
@@ -345,6 +355,7 @@ program = build_program(graph, samples, envelope={"image.data": "varies"})
 files = TorchScript().compile(program, folder)          # [folder / "model.pt"]
 runner = TorchScript().runner(folder, ["model.pt"])     # knows the port order from the artifact
 runner({"image.data": array})                           # {"scores.data": ..., "label.value": ...}
+Onnx(opset_version=18).compile(program, folder)         # [folder / "model.onnx"]: the ports are the graph's own names
 ```
 
 ### What you may change

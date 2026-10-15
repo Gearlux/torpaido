@@ -2,7 +2,7 @@
 
 **Torpaido** compiles a **model package** — a model's inference graph, its weights and its class names
 in one folder, as the experiment-tracking project writes it — into an artifact an inference engine runs
-without Python: TorchScript today, a `torch.export` program, ONNX next.
+without Python: TorchScript, a `torch.export` program, or ONNX.
 
 Built on `Confluid` (configuration), `Loggair` (logging), `RecordStream` (the record pipelines it
 compiles) and the model-package format of the experiment-tracking project.
@@ -221,9 +221,25 @@ feeds the engine with `split` and writes the record back with `join` — so the 
 | --- | --- | --- | --- | --- |
 | `torpaido.backends.TorchScript` | `torchscript` | `model.pt` — a trace of the lowered module, so a size read off a tensor (a picture as tall as its raster) stays dynamic | `torch.jit.load` — the C++ runtimes that exist today | `[torch]` |
 | `torpaido.backends.TorchExport` | `torch-export` | `program.pt2` | `torch.export.load` | `[torch]` |
+| `torpaido.backends.Onnx` | `onnx` | `model.onnx` — one file, the weights inline, checked by `onnx.checker`; the ports are the ONNX graph's own input and output names | onnxruntime, or any ONNX runtime | `[onnx]` |
 
 `torch.export` is the hub: one lowered program, every backend writes it out. The port names travel
 inside the artifact, so a runner built from the folder alone knows the input order.
+
+The ONNX backend has one setting, the opset the deployment runtime supports:
+
+```yaml
+  backend: !class:torpaido.backends.Onnx {opset_version: 18}   # left out: the exporter's recommended opset (20)
+```
+
+The exporter writes opset 18 and up, so a lower `opset_version` is refused rather than silently raised.
+Without the `[onnx]` extra the backend refuses by name, at compile time and at run time:
+
+```
+torpaido: the onnx backend needs onnxscript to write model.onnx — pip install torpaido[onnx]
+torpaido: the onnx backend needs onnxruntime to run model.onnx — pip install torpaido[onnx]
+torpaido: the onnx backend writes opset 18 and up; opset_version 17 cannot be met
+```
 
 ## Parity
 
@@ -246,7 +262,12 @@ pip install "torpaido[torch] @ git+https://github.com/Gearlux/torpaido.git@main"
 ```
 
 The `[torch]` extra holds the lowering language and the torch backends; the core (the IR, the front
-end, the dataflow pass) needs no framework.
+end, the dataflow pass) needs no framework. The `[onnx]` extra (`onnx`, `onnxruntime`, `onnxscript`)
+adds the ONNX backend:
+
+```bash
+pip install "torpaido[torch,onnx] @ git+https://github.com/Gearlux/torpaido.git@main"
+```
 
 ## Architecture
 
