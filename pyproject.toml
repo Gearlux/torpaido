@@ -11,7 +11,7 @@ dependencies = [
     "recordstream>=0.1.0a3",
     # The unit a compile takes is a matrainer MODEL PACKAGE (its graph, weights and class names);
     # matrainer's core is framework-free, so this costs no framework.
-    "matrainer>=0.1.0a1",
+    "matrainer>=0.1.0a2",
     # NOTE: no torch in the core. The IR (`ir.py`), the front end (`frontend.py`) and the dataflow
     # pass (`dataflow.py`) read recordstream's parsed FlowStep list and run its kernel — no framework.
     # The lowering language and the backends are torch: the `[torch]` extra below.
