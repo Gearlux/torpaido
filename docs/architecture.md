@@ -347,6 +347,30 @@ TorchScript came first (user decision D4) because the deployment runtime that ex
   as a size; the manifest stays the contract. The `[onnx]` extra's packages are checked by name before any
   import, so a missing one is a refusal naming `torpaido[onnx]`, never a `ModuleNotFoundError` from inside
   torch.
+* **ONNX has no complex tensors, so the ONNX file is the lowered module behind a real-pair adapter**
+  (2026-10-15): a complex port enters the adapter as a `float32 [..., 2]` tensor (I then Q) and is turned
+  complex before the lowered graph, a complex output leaves as a pair, the model's metadata names those ports
+  and the runner converts both ways — `compiled.yaml` keeps `complex64`, a flow sees the record's complex
+  arrays. The adapter is re-exported under the interface's dynamic shapes (one path for every program) and
+  handed to the exporter; the exporter refused a complex graph input outright (`aten.sym_size.int ... no
+  decompositions registered for the complex-valued input`, measured on the signal-detection package). The
+  exporter translates a handful of ops on a complex value (the FFT, a slice, a concatenation, the magnitude,
+  an element-wise product) and not a framing, a mask or a size read, which is the domain lowering's business:
+  the spectrogram frames on the real view and turns complex at the FFT. A stable sort (`aten.sort.stable`, a
+  detector library's ranking) has no translation of the exporter's own and is written as ONNX's sort (TopK)
+  through the exporter's translation table; a tie's order is then the runtime's, which the set comparison of
+  a region set tolerates by design. A 0-d input is fed 0-d (`np.ascontiguousarray` made it `[1]`, and every
+  scalar derived from it came back as a one-element list — measured on a real package's `time_end_s`).
+  Measured on the signal-detection package (an RF-DETR segmenter on 1024 x 1024 pictures): a 26 s compile of
+  which the export is 5 s, one 126 MB file, onnxruntime 0.06-0.13 s a capture against 0.16-0.18 s eager torch,
+  parity on four captures without a difference under the shipped tolerances.
+* **A refusal of an op the exporter cannot translate is located by the STEP** (2026-10-15): `LoweredGraph.forward`
+  runs every lowering under `fx_traceback.annotate({STEP_ANNOTATION: step})`, so every fx node of a program
+  exported under `preserve_node_meta()` names the step whose lowering wrote it — the export's own stack trace
+  stops at the lowered graph's `forward` line and never reaches the lowering. The ONNX backend parses the
+  exporter's conversion error for the node, reads the step off it, and refuses naming the op, whether its value
+  was complex, the step, its op class and where the lowering is defined — instead of the exporter's forty
+  lines.
 
 ### Example
 
@@ -356,6 +380,7 @@ files = TorchScript().compile(program, folder)          # [folder / "model.pt"]
 runner = TorchScript().runner(folder, ["model.pt"])     # knows the port order from the artifact
 runner({"image.data": array})                           # {"scores.data": ..., "label.value": ...}
 Onnx(opset_version=18).compile(program, folder)         # [folder / "model.onnx"]: the ports are the graph's own names
+# compiled.yaml: inputs: {input.data: {dtype: complex64, shape: [null]}}   the ONNX input: input.data float32 [N, 2]
 ```
 
 ### What you may change

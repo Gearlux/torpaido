@@ -241,6 +241,21 @@ torpaido: the onnx backend needs onnxruntime to run model.onnx — pip install t
 torpaido: the onnx backend writes opset 18 and up; opset_version 17 cannot be met
 ```
 
+ONNX has no complex tensors. A complex port (a capture's IQ samples) is carried as **real pairs** in the file:
+`compiled.yaml` keeps `signal.data: complex64 [null]`, the ONNX graph's input is `signal.data float32 [N, 2]` with I
+and Q as the last dimension, and the compiled op converts both ways, so a flow sees the record's complex arrays only.
+A runtime feeding the file directly interleaves I and Q last. A stable sort (a detector library's ranking) is written
+as ONNX's sort, whose tie order is the runtime's; a region set is compared as a set, so a tie's order never fails
+parity. An op the exporter cannot translate is refused naming it, the step and the lowering that wrote it:
+
+```
+torpaido: the onnx backend cannot translate aten.unfold.default on a complex value in step 'raster/spectrogram' (mydomain.processing.Spectrogram) — written by lower_spectrogram (mydomain/lowering/torch.py:106)
+```
+
+A lowering that must export to ONNX keeps its complex arithmetic to what the exporter translates on complex values
+(the FFT, a slice, a concatenation, the magnitude) and frames, windows and reads sizes on the real view of the samples
+(`torch.view_as_real`).
+
 ## Parity
 
 Every sample record goes through the Python graph and the artifact; each output entry is compared by its
