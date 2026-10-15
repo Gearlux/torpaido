@@ -12,10 +12,10 @@ One config run, `runnable: !class:torpaido.CompilePackage`, writes a STANDALONE 
 one op. Five passes: `matrainer.model_package.load_package_graph` → `frontend.graph_from_steps`
 (subgraphs inlined) → `dataflow.measure` (reads/writes measured by ablation on the sample records,
 then `Graph.prune_sidecars`) → `program.build_program` (one `torch.export` program from the
-registered lowerings) → a backend (`backends.TorchScript`, `backends.TorchExport`) plus
-`parity.compare` with a per-node bisect. Torpaido ships recordstream's op lowerings
-(`lowering/recordstream.py`); a domain package ships its own behind a `[compile]` extra and the
-entry-point group `torpaido.lowerings`. Not built: ONNX and the other backends, any domain lowering,
+registered lowerings) → a backend (`backends.TorchScript`, `backends.TorchExport`, `backends.Onnx`
+behind the `[onnx]` extra) plus `parity.compare` with a per-node bisect. Torpaido ships recordstream's
+op lowerings (`lowering/recordstream.py`); a domain package ships its own behind a `[compile]` extra
+and the entry-point group `torpaido.lowerings`. Not built: the other backends, any domain lowering,
 runtime branches, a draw's refusal by name — `TASKS.md`.
 
 ## Rules
@@ -132,7 +132,17 @@ runtime branches, a draw's refusal by name — `TASKS.md`.
   exported program still validates the lowering under the envelope and is what `TorchExport` saves.
   A lowering still reads a size off a tensor (`_extent`-style), never from Python arithmetic on a
   shape, so eager and export agree.
-  (`tests/test_convert_to_image.py::test_a_torchscript_artifact_keeps_a_raster_following_height_dynamic`)
+  (`tests/test_convert_to_image.py::test_an_artifact_keeps_a_raster_following_height_dynamic`)
+- **The ONNX file's ports are the graph's own names** (2026-10-15): `backends.Onnx` exports `program.exported`
+  with `torch.onnx.export(dynamo=True)` under the port names — one `model.onnx`, the weights inline, `onnx.checker`'s
+  full check before it is kept, onnxruntime's CPU session as the runner; no interface file. The exported program's
+  `sym_size` becomes a `Shape` node, so a raster-following height stays dynamic there too (the same test, over both
+  backends). An `opset_version` below `ONNX_OPSET_FLOOR` (18: asked for 17, the exporter wrote 18) is refused, never
+  raised silently. The `[onnx]` extra's packages are checked with `find_spec` BEFORE any import and a missing one is
+  refused naming the extra (`pip install torpaido[onnx]`) — never a `ModuleNotFoundError` from inside torch. `dev`
+  carries the extra so the workspace venv and the generated CI run the ONNX tests, which skip without it
+  (`conftest.needs_onnx`). The exporter's loggers (`onnxscript`, `onnx_ir`) are held to WARNING during the export.
+  (`tests/test_onnx.py`, `tests/test_program.py::test_a_backend_reproduces_the_python_graph_on_a_picture_of_another_size`)
 - **The compiled folder is STANDALONE** (user ruling 2026-10-13): `class_names.json` is copied in,
   the manifest names the package only as provenance (`source.package`, `source.package_sha256`), and
   `CompiledPackage(path=<compiled folder>)` runs it after the package is gone. Default location

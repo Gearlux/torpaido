@@ -7,11 +7,12 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pytest
 import torch
+from conftest import needs_onnx
 from recordstream import Label, Record, Transform
 from recordstream.flow import parse_flow, run_steps_multi
 from toy_graph import live_steps, sample_record
 
-from torpaido.backends import TorchExport, TorchScript, backend_named
+from torpaido.backends import Onnx, TorchExport, TorchScript, backend_named
 from torpaido.dataflow import measure
 from torpaido.lowering import Context, ItemValue, item_rule, lowers
 from torpaido.program import build_program
@@ -56,7 +57,7 @@ def test_the_interface_lists_the_tensor_ports_and_specializes_the_rest(toy: Toy,
     assert program.interface.envelope == {"image.data": "varies"}
 
 
-@pytest.mark.parametrize("backend", [TorchScript(), TorchExport()])
+@pytest.mark.parametrize("backend", [TorchScript(), TorchExport(), pytest.param(Onnx(), marks=needs_onnx)])
 def test_a_backend_reproduces_the_python_graph_on_a_picture_of_another_size(
     toy: Toy, samples: List[Record], tmp_path: Path, backend: Any
 ) -> None:

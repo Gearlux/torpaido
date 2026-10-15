@@ -1,5 +1,6 @@
 """Fixtures: a model package written from the toy graph, and the sample records the compiler measures on."""
 
+import importlib.util
 from pathlib import Path
 from typing import List
 
@@ -7,6 +8,13 @@ import pytest
 from matrainer.model_package import PackageModel
 from recordstream import Record
 from toy_graph import GRAPH, HALF, WEIGHTS_SLOT, sample_record, write_weights
+
+#: Skips a test that needs the ``[onnx]`` extra (``onnx``, ``onnxruntime``, ``onnxscript``) where it is not installed —
+#: ``pip install torpaido[torch]`` alone; the workspace's ``dev`` extra carries it.
+needs_onnx = pytest.mark.skipif(
+    any(importlib.util.find_spec(name) is None for name in ("onnx", "onnxruntime", "onnxscript")),
+    reason="the [onnx] extra is not installed",
+)
 
 
 @pytest.fixture

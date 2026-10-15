@@ -14,7 +14,7 @@ through the package's own loader, so the compiled form matches exactly the graph
 | file | what it is |
 | --- | --- |
 | `compiled.yaml` | the manifest: the backend, its files with digests, every input and output tensor (`<entry>.<part>`: dtype, shape, item type), `specialized` (inputs fixed), `constants` (outputs constant), `envelope`, `pruned`, the parity verdict, the installed package versions, the package as provenance |
-| the backend's file(s) | `model.pt` (TorchScript), `program.pt2` (torch.export) |
+| the backend's file(s) | `model.pt` (TorchScript), `program.pt2` (torch.export), `model.onnx` (ONNX) |
 | `class_names.json` | the package's vocabulary, copied — the artifact emits `int64` label indices |
 | `parity.yaml` | per sample record, per output entry: the differences measured (empty when parity holds) |
 
@@ -268,5 +268,21 @@ first_node_differences:
 | --- | --- | --- | --- |
 | `torchscript` | `torpaido.backends.TorchScript` | `model.pt` (a trace of the lowered module: a size read off a tensor stays dynamic) | `torch.jit.load` (the C++ runtimes that exist today) |
 | `torch-export` | `torpaido.backends.TorchExport` | `program.pt2` | `torch.export.load` |
+| `onnx` | `torpaido.backends.Onnx` | `model.onnx` (one file, the weights inline, checked by `onnx.checker`; the ports are the ONNX graph's own input and output names) | onnxruntime, or any ONNX runtime |
 
-Both start from the same exported program; the manifest is the same whichever wrote the files.
+All three start from the same exported program; the manifest is the same whichever wrote the files.
+
+The ONNX backend needs the `[onnx]` extra (`onnx`, `onnxruntime`, `onnxscript`) and takes one setting,
+`opset_version` — the opset the deployment runtime supports; left out, the exporter's recommended one (20
+with torch 2.13). The exporter writes opset 18 and up, so a lower value is refused rather than silently
+raised. A missing package is refused by name:
+
+```yaml
+  backend: !class:torpaido.backends.Onnx {opset_version: 18}
+```
+
+```
+torpaido: the onnx backend needs onnxscript to write model.onnx — pip install torpaido[onnx]
+torpaido: the onnx backend needs onnxruntime to run model.onnx — pip install torpaido[onnx]
+torpaido: the onnx backend writes opset 18 and up; opset_version 17 cannot be met
+```
