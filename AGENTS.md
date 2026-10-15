@@ -141,8 +141,27 @@ runtime branches, a draw's refusal by name — `TASKS.md`.
   raised silently. The `[onnx]` extra's packages are checked with `find_spec` BEFORE any import and a missing one is
   refused naming the extra (`pip install torpaido[onnx]`) — never a `ModuleNotFoundError` from inside torch. `dev`
   carries the extra so the workspace venv and the generated CI run the ONNX tests, which skip without it
-  (`conftest.needs_onnx`). The exporter's loggers (`onnxscript`, `onnx_ir`) are held to WARNING during the export.
+  (`conftest.needs_onnx`). The exporter's loggers (`onnxscript`, `onnx_ir`) are held to ERROR during the export: their
+  INFO and WARNING lines narrate its own passes ("Skipping constant folding for op Split"), nothing an operator acts on.
   (`tests/test_onnx.py`, `tests/test_program.py::test_a_backend_reproduces_the_python_graph_on_a_picture_of_another_size`)
+- **ONNX has no complex tensors: a complex port is REAL PAIRS in the file, complex in the manifest** (2026-10-15):
+  `Onnx.compile` re-exports the lowered module behind an adapter (a complex input a `float32 [..., 2]` tensor turned
+  complex by `view_as_complex` before the graph, a complex output a pair after it), names those ports in the model's
+  metadata (`COMPLEX_PORTS_KEY`), and `_OnnxRunner` converts both ways (`_pairs` / `_complex`); `compiled.yaml` keeps
+  `complex64 [null]`. A 0-d input is fed 0-d (`np.asarray(x, order="C")`, never `ascontiguousarray`: it makes `[1]`,
+  and every scalar derived from it came back a list — measured on a real package's `time_end_s`). `aten.sort.stable`
+  (a detector library's ranking) is written as ONNX's sort through the exporter's `custom_translation_table`
+  (onnxscript's `aten_sort`): a tie's order is the runtime's, which the set comparison tolerates. A lowering that must
+  export to ONNX keeps its complex arithmetic to what the exporter translates (the FFT, a slice, a concatenation, the
+  magnitude) and frames, windows and reads sizes on the real view — a domain's rule, pinned in its own suite.
+  (`tests/test_onnx.py::test_a_complex_port_is_carried_as_real_pairs_and_comes_back_complex`,
+  `::test_a_scalar_output_derived_from_a_scalar_input_keeps_its_shape`, `::test_a_stable_sort_exports_as_onnx_s_sort`)
+- **An op the exporter cannot translate is refused naming the STEP** (2026-10-15): `LoweredGraph.forward` runs every
+  lowering under `fx_traceback.annotate({STEP_ANNOTATION: step})`, the ONNX backend exports under
+  `preserve_node_meta()` so every node carries its step, and `_untranslatable` turns the exporter's conversion error
+  into `torpaido: the onnx backend cannot translate <op>[ on a complex value] in step '<step>' (<op class>) — written
+  by <lowering> (<file>:<line>)`. The export's own stack trace stops at `forward`, so never locate by it.
+  (`tests/test_onnx.py::test_an_op_the_exporter_cannot_translate_is_refused_naming_the_step_and_the_lowering_s_line`)
 - **The compiled folder is STANDALONE** (user ruling 2026-10-13): `class_names.json` is copied in,
   the manifest names the package only as provenance (`source.package`, `source.package_sha256`), and
   `CompiledPackage(path=<compiled folder>)` runs it after the package is gone. Default location

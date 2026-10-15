@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 import numpy as np
 import torch
+import torch.fx.traceback as fx_traceback
 from recordstream import Record
 from torch import Tensor, nn
 from torch.export import Dim, ExportedProgram
@@ -36,10 +37,23 @@ from torpaido.lowering.context import Context
 from torpaido.lowering.items import ItemValue, Watched, is_number, item_rule, to_python
 from torpaido.lowering.registry import GROUP, Lowering, discover, lowering_for
 
-__all__ = ["Interface", "Port", "Program", "build_program", "dotted", "interface_arrays", "resolve_dotted"]
+__all__ = [
+    "Interface",
+    "Port",
+    "Program",
+    "STEP_ANNOTATION",
+    "build_program",
+    "dotted",
+    "interface_arrays",
+    "resolve_dotted",
+]
 
 #: What the envelope may say about an input part instead of fixing it to a value.
 VARIES = "varies"
+#: The key under which every fx node of an exported program names the step whose lowering wrote it
+#: (``node.meta["custom"][STEP_ANNOTATION]``, kept by an export run under ``fx_traceback.preserve_node_meta()``) —
+#: what a backend's refusal of an op it cannot translate is located by.
+STEP_ANNOTATION = "torpaido_step"
 
 
 def dotted(item_type: type) -> str:
@@ -193,7 +207,8 @@ class LoweredGraph(nn.Module):
         self.node_outputs = {}
         for node in self._nodes:
             reads = {entry: live[value.name] for entry, value in node.reads.items()}
-            written = self._lowerings[node.name](node.op, reads, self._contexts[node.name])
+            with fx_traceback.annotate({STEP_ANNOTATION: node.name}):  # eagerly and under a trace: a no-op
+                written = self._lowerings[node.name](node.op, reads, self._contexts[node.name])
             if set(written) != set(node.writes):
                 raise ValueError(
                     f"torpaido: step {node.name!r} ({dotted(type(node.op))}): its lowering wrote {sorted(written)}, "

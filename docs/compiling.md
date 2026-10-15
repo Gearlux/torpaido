@@ -286,3 +286,17 @@ torpaido: the onnx backend needs onnxscript to write model.onnx — pip install 
 torpaido: the onnx backend needs onnxruntime to run model.onnx — pip install torpaido[onnx]
 torpaido: the onnx backend writes opset 18 and up; opset_version 17 cannot be met
 ```
+
+ONNX has no complex tensors: a complex port is carried as real pairs in the file — `compiled.yaml` keeps
+`signal.data: complex64 [null]`, the ONNX input is `signal.data float32 [N, 2]` (I and Q last), and the compiled op
+converts both ways. A runtime feeding the file directly interleaves I and Q last. A stable sort is written as ONNX's
+sort (its tie order the runtime's; a region set is compared as a set). An op the exporter cannot translate is refused
+naming the op, the step and the lowering that wrote it:
+
+```
+torpaido: the onnx backend cannot translate aten.unfold.default on a complex value in step 'raster/spectrogram' (mydomain.processing.Spectrogram) — written by lower_spectrogram (mydomain/lowering/torch.py:106)
+```
+
+The exporter translates only the FFT, a slice, a concatenation and the magnitude on a complex value: a lowering that
+must export to ONNX frames, windows and reads sizes on the real view of the samples (`torch.view_as_real`) and turns
+the value complex right before the FFT.
