@@ -182,7 +182,7 @@ runtime branches, a draw's refusal by name — `TASKS.md`.
 - `torch` is imported only in `lowering/context.py`, `lowering/recordstream.py`, `program.py`,
   `backends/` and a backend's runner; `torpaido/__init__.py` reaches `CompilePackage` /
   `CompiledPackage` lazily (PEP 562) and the IR, front end and dataflow pass import no framework.
-  `pyproject.toml` declares torch under `[torch]`, named by `[tool.aisland] frameworks`.
+  `pyproject.toml` declares torch under `[torch]`, offered for aisland's `framework` selection (`[tool.aisland.selection.framework]`).
 - `compiled.yaml` is format 1 and carries the generator header; a field a reader may ignore is
   added freely, a field that changes meaning bumps `COMPILED_FORMAT`; the op refuses another format.
   (`tests/test_compile_package.py::test_the_manifest_carries_the_generator_header`,

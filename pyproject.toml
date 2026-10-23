@@ -24,12 +24,12 @@ requires-python = ">=3.12"
 
 [project.optional-dependencies]
 # The lowering language (every lowering is a torch function), the `torch.export` hub and the
-# TorchScript / `.pt2` backends. `[tool.aisland] frameworks` below names it, so the workspace's
-# framework selection installs it.
+# TorchScript / `.pt2` backends. `[tool.aisland.selection.framework]` below offers it, so the
+# workspace's framework choice installs it.
 torch = ["torch"]
 # The ONNX backend (`torpaido.backends.Onnx`): the dynamo exporter needs onnxscript, the checker onnx, and
 # onnxruntime runs the file — for parity at compile time and in CompiledPackage. A backend, not a framework:
-# the compile config chooses it, so it is not under `[tool.aisland] frameworks`.
+# the compile config chooses it, so it is not under `[tool.aisland.selection.framework]`.
 onnx = ["onnx", "onnxruntime", "onnxscript"]
 dev = [
     "torpaido[torch]",
@@ -63,9 +63,10 @@ torpaido-compile = "torpaido.compile"
 torpaido-compiled = "torpaido.compiled"
 torpaido-backends = "torpaido.backends"
 
-# The frameworks this project has an extra for — `aisland framework set torch` installs `torpaido[torch]`.
-[tool.aisland]
-frameworks = ["torch"]
+# The frameworks this project has an extra for — choosing `torch` (`aisland workspace configure framework set …`)
+# installs `torpaido[torch]`.
+[tool.aisland.selection.framework]
+choices = ["torch"]
 
 [tool.black]
 line-length = 120
