@@ -16,6 +16,7 @@ from typing import Any, Callable, Dict, Optional
 from confluid import load_configurables
 
 __all__ = [
+    "DISCOVERED",
     "GROUP",
     "LOWERINGS",
     "MODEL_LOWERINGS",
@@ -26,6 +27,7 @@ __all__ = [
     "lowers",
     "lowers_model",
     "model_lowering_for",
+    "no_model_lowering",
 ]
 
 #: The entry-point group a package lists its lowering modules under.
@@ -108,12 +110,57 @@ def model_lowering_for(model: Any) -> Optional[ModelLowering]:
     return MODEL_LOWERINGS.get(type(model))
 
 
+#: What the last :func:`discover` found under :data:`GROUP`: entry name -> the module it imported, or the exception
+#: its import raised. Kept so a refusal can say what WAS found (:func:`no_model_lowering`).
+DISCOVERED: Dict[str, Any] = {}
+
+
 def discover() -> None:
     """Import every lowering module: torpaido's own, then every module listed under :data:`GROUP`.
 
     Registration is an import side effect, so this is called before a compile and before a compiled
-    package runs (its item rules may live in a domain package too). Repeated calls are cheap.
+    package runs (its item rules may live in a domain package too). Repeated calls are cheap. What the
+    group gave — each entry's module, or the exception its import raised — stays in :data:`DISCOVERED`.
     """
     import torpaido.lowering.recordstream  # noqa: F401  — registration is the import's side effect
 
-    load_configurables(GROUP)
+    DISCOVERED.clear()
+    DISCOVERED.update(load_configurables(GROUP))
+
+
+def no_model_lowering(held: Any, where: str = "") -> ValueError:
+    """The refusal for a held object (a predictor) without a model lowering, saying what WAS found.
+
+    A lowering that exists but is not registered — the package that defines the object was installed before it
+    declared its entry point, or without its lowering extra — looks exactly like a lowering that was never written,
+    so the message lists the lowering modules the entry-point group loaded, the entries that failed to import, and,
+    when none of the loaded modules comes from the package defining the object, the reinstall.
+
+    Args:
+        held: The object without a lowering.
+        where: What holds it, ending in a space (``"step 'detect' (DetectionModelPredict) "``), or blank.
+    """
+    kind = type(held)
+    package = kind.__module__.split(".", 1)[0]
+    loaded = {name: module for name, module in DISCOVERED.items() if not isinstance(module, Exception)}
+    failed = {name: exc for name, exc in DISCOVERED.items() if isinstance(exc, Exception)}
+    found = ", ".join(f"{name} ({module.__name__})" for name, module in sorted(loaded.items())) or "none"
+    lines = [
+        f"torpaido: {where}holds a {kind.__module__}.{kind.__qualname__}, which has no model lowering.",
+        f"  Lowering modules found under the entry point group {GROUP!r}: {found}"
+        + (
+            "; failed to import: "
+            + ", ".join(f"{name} ({type(exc).__name__}: {exc})" for name, exc in sorted(failed.items()))
+            if failed
+            else ""
+        )
+        + ".",
+    ]
+    if all(module.__name__.split(".", 1)[0] != package for module in loaded.values()):
+        lines.append(
+            f"  None comes from {package!r}, the package that defines it: install that package with its lowering "
+            "extra, or reinstall it so its entry point is registered (an editable install registers entry points at "
+            "install time)."
+        )
+    lines.append(f"  Or register one with @lowers_model({kind.__name__}).")
+    return ValueError("\n".join(lines))

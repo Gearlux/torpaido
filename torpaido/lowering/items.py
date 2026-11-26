@@ -25,8 +25,10 @@ from typing import (
     Any,
     Callable,
     Dict,
+    List,
     Mapping,
     Optional,
+    Set,
     Tuple,
     Type,
     TypeGuard,
@@ -39,7 +41,7 @@ from typing import (
 import numpy as np
 from recordstream import NDArrayItem
 
-__all__ = ["ItemRule", "ItemValue", "Parts", "Facts", "item_rule", "lowers_item", "is_number", "to_python"]
+__all__ = ["ItemRule", "ItemValue", "Parts", "Facts", "item_rule", "lowers_item", "is_number", "to_python", "Watched"]
 
 Parts = Dict[str, Any]
 Facts = Dict[str, Any]
@@ -77,11 +79,56 @@ def _as_array(value: Any) -> np.ndarray:
     return np.asarray(value)
 
 
+class Watched(dict):  # type: ignore[type-arg]
+    """A parts or facts mapping that records which keys a lowering LOOKED AT, into the ``seen`` set it shares.
+
+    A key is seen when it is read (``[]``, ``get``) or when the mapping is walked (``items``, ``values``, ``keys``,
+    iteration, a ``dict(...)`` copy — what ``ItemValue.replace`` does to carry an item forward, so every part it
+    carries counts as read); ``in`` alone is not a look. The compiler hands an INPUT entry's parts and facts to the
+    lowerings this way once, and what was never seen is not part of the artifact's interface.
+    """
+
+    __slots__ = ("seen",)
+
+    def __init__(self, values: Mapping[str, Any], seen: Set[str]) -> None:
+        super().__init__(values)
+        self.seen = seen
+
+    def __getitem__(self, key: str) -> Any:
+        self.seen.add(key)
+        return super().__getitem__(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        self.seen.add(key)
+        return super().get(key, default)
+
+    def keys(self) -> Any:
+        self.seen.update(super().keys())
+        return super().keys()
+
+    def values(self) -> Any:
+        self.seen.update(super().keys())
+        return super().values()
+
+    def items(self) -> Any:
+        self.seen.update(super().keys())
+        return super().items()
+
+    def __iter__(self) -> Any:
+        self.seen.update(super().keys())
+        return super().__iter__()
+
+    def copy(self) -> Dict[str, Any]:
+        self.seen.update(super().keys())
+        return dict(super().items())
+
+
 class ItemValue:
     """The compile-time form of one record entry: its item type, its parts (tensors or constants) and its facts.
 
     ``value.data`` is the ``data`` part, ``value.value`` the ``value`` part (a number) or fact (a string);
-    ``replace(name=...)`` returns a copy with one part or fact changed, whichever ``name`` is.
+    ``replace(name=...)`` returns a copy with one part or fact changed, whichever ``name`` is. A :class:`Watched`
+    mapping is kept as it is (it records the reads); any other mapping is copied.
     """
 
     __slots__ = ("item_type", "parts", "facts")
@@ -90,8 +137,8 @@ class ItemValue:
         self, item_type: type, parts: Optional[Mapping[str, Any]] = None, facts: Optional[Mapping[str, Any]] = None
     ) -> None:
         self.item_type = item_type
-        self.parts: Parts = dict(parts or {})
-        self.facts: Facts = dict(facts or {})
+        self.parts: Parts = parts if isinstance(parts, Watched) else dict(parts or {})
+        self.facts: Facts = facts if isinstance(facts, Watched) else dict(facts or {})
 
     @property
     def data(self) -> Any:
@@ -120,7 +167,12 @@ class ItemValue:
 
 
 class ItemRule:
-    """How one item type splits into parts and facts and joins back; subclass and register with :func:`lowers_item`."""
+    """How one item type splits into parts and facts and joins back; subclass and register with :func:`lowers_item`.
+
+    A rule may also say how two items of its type are COMPARED for parity (:meth:`compare`): the default is part by
+    part, which is wrong for a set whose rows have no order of their own (a detector's boxes) — such a rule matches
+    the rows and reports what is unmatched.
+    """
 
     item_type: type = object
 
@@ -129,6 +181,13 @@ class ItemRule:
 
     def join(self, parts: Parts, facts: Facts) -> Any:
         raise NotImplementedError(f"{type(self).__name__} must implement join(parts, facts) -> item")
+
+    def compare(self, expected: Any, actual: Any, tolerances: Mapping[str, Any]) -> Optional[List[Tuple[str, str]]]:
+        """``[(part, measure), ...]`` of the disagreements between two items, or ``None`` to compare part by part.
+
+        ``tolerances`` is the entry's own mapping (``atol``, ``rtol`` and whatever keys the rule reads).
+        """
+        return None
 
 
 class ArrayRule(ItemRule):

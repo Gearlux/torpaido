@@ -121,6 +121,55 @@ def _unused(record: Record) -> Any:  # keeps the Record import honest for reader
     return sample_record()
 
 
+def test_a_missing_model_lowering_s_refusal_says_what_was_found_and_what_to_do(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A held object without a lowering is refused naming the lowering modules the entry-point group DID load, the
+    ones that failed to import, and — when none comes from the package that defines the object — the reinstall:
+    on a machine where a package was installed before it declared its entry point, the lowering exists and is not
+    found (measured 2026-10-13: raidar's RF-DETR lowering, 'which has no model lowering' and nothing else)."""
+    import types
+
+    from torpaido.lowering import no_model_lowering
+    from torpaido.lowering import registry as reg
+
+    class Held:
+        pass
+
+    found = types.ModuleType("somedomain.lowering")
+    monkeypatch.setattr(reg, "DISCOVERED", {"somedomain": found, "broken": ImportError("No module named 'torch'")})
+
+    refused = no_model_lowering(Held(), where="step 'detect' (DetectionModelPredict) ")
+    text = str(refused)
+    assert text.splitlines() == [
+        f"torpaido: step 'detect' (DetectionModelPredict) holds a {Held.__module__}.{Held.__qualname__}, which has no "
+        "model lowering.",
+        "  Lowering modules found under the entry point group 'torpaido.lowerings': somedomain (somedomain.lowering); "
+        "failed to import: broken (ImportError: No module named 'torch').",
+        f"  None comes from {Held.__module__.split('.')[0]!r}, the package that defines it: install that package with "
+        "its lowering extra, or reinstall it so its entry point is registered (an editable install registers entry "
+        "points at install time).",
+        "  Or register one with @lowers_model(Held).",
+    ]
+    # the defining package IS among the loaded modules: the lowering is simply missing, no reinstall advice
+    found_here = types.ModuleType(f"{Held.__module__.split('.')[0]}.lowering")
+    monkeypatch.setattr(reg, "DISCOVERED", {"here": found_here})
+    lines = str(no_model_lowering(Held())).splitlines()
+    assert lines[0].startswith(f"torpaido: holds a {Held.__module__}.") and len(lines) == 3
+    assert "None comes from" not in str(no_model_lowering(Held()))
+    assert (
+        lines[1].endswith("here (test_lowering.lowering).")
+        and lines[2] == "  Or register one with @lowers_model(Held)."
+    )
+
+
+def test_discover_keeps_what_the_entry_point_group_gave() -> None:
+    from torpaido.lowering import registry as reg
+
+    reg.discover()
+    assert isinstance(reg.DISCOVERED, dict)
+    for name, module in reg.DISCOVERED.items():
+        assert isinstance(name, str) and (isinstance(module, Exception) or hasattr(module, "__name__"))
+
+
 def test_a_model_lowering_is_found_by_the_held_object_s_exact_class() -> None:
     from torpaido.lowering import lowers_model, model_lowering_for
 

@@ -14,6 +14,8 @@ runnable: !class:torpaido.CompilePackage
   # The backend that writes the artifact. Left out: TorchScript.
   #   !class:torpaido.backends.TorchScript {}    model.pt      torch.jit.load (the C++ runtimes that exist)
   #   !class:torpaido.backends.TorchExport {}    program.pt2   torch.export.load
+  #   !class:torpaido.backends.Onnx {}           model.onnx    onnxruntime, any ONNX runtime (needs the [onnx] extra)
+  #       opset_version: 18   the opset the deployment runtime supports; left out: the exporter's (20); below 18 refused
   backend: !class:torpaido.backends.TorchScript {}
   # The record entries the artifact must deliver. Left out: the entries written by the last writing
   # step on the way to the graph's yielded step. Everything the outputs never need is pruned.

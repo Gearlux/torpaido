@@ -14,7 +14,7 @@ through the package's own loader, so the compiled form matches exactly the graph
 | file | what it is |
 | --- | --- |
 | `compiled.yaml` | the manifest: the backend, its files with digests, every input and output tensor (`<entry>.<part>`: dtype, shape, item type), `specialized` (inputs fixed), `constants` (outputs constant), `envelope`, `pruned`, the parity verdict, the installed package versions, the package as provenance |
-| the backend's file(s) | `model.pt` (TorchScript), `program.pt2` (torch.export) |
+| the backend's file(s) | `model.pt` (TorchScript), `program.pt2` (torch.export), `model.onnx` (ONNX) |
 | `class_names.json` | the package's vocabulary, copied — the artifact emits `int64` label indices |
 | `parity.yaml` | per sample record, per output entry: the differences measured (empty when parity holds) |
 
@@ -53,7 +53,7 @@ recordstream run compile/detector.yaml
 | `samples` | a source of records (anything iterable) — measured on, verified against |
 | `sample_count` | how many records to take from `samples` (default 4) |
 | `output_dir` | somewhere else than `<package>/compiled/<name>` |
-| `tolerances` | `atol` / `rtol` defaults and per-entry overrides for parity |
+| `tolerances` | `atol` / `rtol` defaults and per-entry overrides for parity; an entry whose item rule compares its own way (a set of boxes matched by overlap) reads its keys from the entry's mapping (§8) |
 | `description` | one line for the manifest |
 
 A compile that fails parity leaves `<name>.partial/` with its `parity.yaml` and raises; a compile that
@@ -85,24 +85,31 @@ op.
 
 ## 4. The envelope
 
-An input part is `<entry>.<part>` — `signal.data`, `signal.samplerate`, `image.layout`.
+An input part is `<entry>.<part>` — `signal.data`, `signal.samplerate`, `image.layout`. Only the parts
+and facts some lowering READS are the artifact's: a probe run on the first sample hands each lowering the
+input entries through a recording view, and what no lowering looked at (a capture's derived `duration`,
+its SNR fields, a source name) is neither an input nor fixed — two samples may differ there freely, and
+`CompiledPackage` never checks it. For the read parts:
 
 | the envelope says | the artifact |
 | --- | --- |
 | `signal.data: varies` | every dimension of that tensor is dynamic |
 | `signal.samplerate: varies` | the scalar is an input tensor (0-d, `float64` / `int64`) |
-| `signal.samplerate: 100e6` | fixed: baked in, under `specialized`; checked against every sample |
-| *(not named)* | fixed at the samples' value, which every sample must share; a tensor dimension the samples disagree on is dynamic |
+| `signal.samplerate: 100e6` | fixed: baked in, under `specialized`; a sample with another value is refused |
+| *(not named)* | what the samples do: a value they share is fixed, under `specialized`; a scalar, or a tensor dimension, they disagree on is dynamic |
 
-Facts (a layout, a scaling name) are always fixed; the samples must agree on them.
+Facts (a layout, a scaling name) are always fixed; the samples must agree on the ones that are read.
 
 Refusals, with what to do:
 
 ```
-torpaido: the input gain.value is fixed, but the samples disagree: record 1 has 2.0 and record 2 has 3.0
-  Let it vary (envelope: gain.value: varies) or compile from samples that agree.
+torpaido: the envelope fixes gain.value to 2.0, but record 2 has 3.0
+
+torpaido: the input image.layout is a fact of the artifact, but the samples disagree: record 1 has 'HWC' and record 2 has 'CHW'
 
 torpaido: the envelope names 'picture.data', which is not an input part (gain.value, image.data, image.layout)
+
+torpaido: the envelope names 'clip.length_s', which no step of the artifact reads (it reads clip.data, clip.kind, clip.rate)
 
 torpaido: step 'tile' (mydomain.ops.Tile) needs 'count' as a constant, but it depends on count.value, which
 the envelope lets vary at cfg/model.yaml:3:3
@@ -121,6 +128,19 @@ Two records that make a step read different entries are refused:
 ```
 torpaido: step 'fickle' reads ['level', 'tag'] on record 1 and ['level'] on record 2 — a data-dependent read
 has no static graph at model.yaml:7:3
+```
+
+A step that holds a model (a detector holding a predictor) lowers through the model's own lowering, which
+its package lists under the entry-point group `torpaido.lowerings`. When none is registered the refusal says
+what the group did load, so a package installed before it declared its entry point — the lowering exists
+and is not found — explains itself:
+
+```
+torpaido: step 'detect' (DetectionModelPredict) holds a mydomain.predictor.Predictor, which has no model lowering.
+  Lowering modules found under the entry point group 'torpaido.lowerings': signals (signals.lowering).
+  None comes from 'mydomain', the package that defines it: install that package with its lowering extra, or
+  reinstall it so its entry point is registered (an editable install registers entry points at install time).
+  Or register one with @lowers_model(Predictor).
 ```
 
 ## 6. Writing a lowering
@@ -210,15 +230,73 @@ records:
 - {record: 2, differences: []}
 ```
 
+Each output entry is compared by its item rule: part by part — arrays within `atol` / `rtol`, integers by
+whole steps, facts exactly — unless the rule gives its own `compare(expected, actual, tolerances)`. A rule
+does that when its rows have no order of their own: a detector's boxes are ranked by the model, and two
+scores a hair apart swap places on a picture that differs by one grey level, so a row-by-row compare fails
+a correct artifact. Such a rule matches the rows (by overlap and label) and reads its own keys from the
+entry's tolerance mapping:
+
+```yaml
+tolerances:
+  atol: 1.0e-05                                   # the defaults, for every part-by-part entry
+  predictions: {iou: 0.9, score_atol: 0.02}       # what the box set's rule reads
+```
+
+```python
+class BoxSetRule(ItemRule):
+    def compare(self, expected, actual, tolerances):
+        unmatched = ...  # rows of `expected` with no row of `actual` of the same label at IoU >= tolerances.get("iou", 0.99)
+        return [("boxes", f"{len(unmatched)} rows unmatched")] if unmatched else []
+```
+
 On a failure the compile raises, and the report carries `first_disagreeing_node` — the first step whose
-lowering, run eagerly in torch, disagrees with its numpy op on that record — so the fix is a lowering,
-named, not a tensor diff.
+lowering, run eagerly in torch, disagrees with its numpy op on that record, judged by the same tolerances —
+and `first_node_differences`, that node's own measured gaps (`[{entry, part, measure}]`), so the fix is a
+lowering, named, with its error in hand, not a tensor diff:
+
+```yaml
+status: failed
+first_disagreeing_node: picture/image
+first_node_differences:
+- {entry: image, part: data, measure: 'max |a - b| = 1.0 (atol 1e-05, rtol 0.0001)'}
+```
 
 ## 9. Backends
 
 | `backend:` | class | writes | runs with |
 | --- | --- | --- | --- |
-| `torchscript` | `torpaido.backends.TorchScript` | `model.pt` | `torch.jit.load` (the C++ runtimes that exist today) |
+| `torchscript` | `torpaido.backends.TorchScript` | `model.pt` (a trace of the lowered module: a size read off a tensor stays dynamic) | `torch.jit.load` (the C++ runtimes that exist today) |
 | `torch-export` | `torpaido.backends.TorchExport` | `program.pt2` | `torch.export.load` |
+| `onnx` | `torpaido.backends.Onnx` | `model.onnx` (one file, the weights inline, checked by `onnx.checker`; the ports are the ONNX graph's own input and output names) | onnxruntime, or any ONNX runtime |
 
-Both start from the same exported program; the manifest is the same whichever wrote the files.
+All three start from the same exported program; the manifest is the same whichever wrote the files.
+
+The ONNX backend needs the `[onnx]` extra (`onnx`, `onnxruntime`, `onnxscript`) and takes one setting,
+`opset_version` — the opset the deployment runtime supports; left out, the exporter's recommended one (20
+with torch 2.13). The exporter writes opset 18 and up, so a lower value is refused rather than silently
+raised. A missing package is refused by name:
+
+```yaml
+  backend: !class:torpaido.backends.Onnx {opset_version: 18}
+```
+
+```
+torpaido: the onnx backend needs onnxscript to write model.onnx — pip install torpaido[onnx]
+torpaido: the onnx backend needs onnxruntime to run model.onnx — pip install torpaido[onnx]
+torpaido: the onnx backend writes opset 18 and up; opset_version 17 cannot be met
+```
+
+ONNX has no complex tensors: a complex port is carried as real pairs in the file — `compiled.yaml` keeps
+`signal.data: complex64 [null]`, the ONNX input is `signal.data float32 [N, 2]` (I and Q last), and the compiled op
+converts both ways. A runtime feeding the file directly interleaves I and Q last. A stable sort is written as ONNX's
+sort (its tie order the runtime's; a region set is compared as a set). An op the exporter cannot translate is refused
+naming the op, the step and the lowering that wrote it:
+
+```
+torpaido: the onnx backend cannot translate aten.unfold.default on a complex value in step 'raster/spectrogram' (mydomain.processing.Spectrogram) — written by lower_spectrogram (mydomain/lowering/torch.py:106)
+```
+
+The exporter translates only the FFT, a slice, a concatenation and the magnitude on a complex value: a lowering that
+must export to ONNX frames, windows and reads sizes on the real view of the samples (`torch.view_as_real`) and turns
+the value complex right before the FFT.

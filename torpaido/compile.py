@@ -177,11 +177,19 @@ class CompilePackage:
             program, backend, staging, [path.name for path in files], steps, result, records, tolerances
         )
         if failure is not None:
-            ordinal, difference, node = failure
-            _write_parity(staging, "failed", rows, tolerances, first_disagreeing_node=node)
+            ordinal, difference, node, at_node = failure
+            _write_parity(
+                staging,
+                "failed",
+                rows,
+                tolerances,
+                first_disagreeing_node=node,
+                first_node_differences=[d.as_dict() for d in at_node],
+            )
+            there = f" ({at_node[0].entry}.{at_node[0].part} {at_node[0].measure})" if at_node else ""
             raise ValueError(
                 f"CompilePackage: parity failed on record {ordinal}: {difference.entry}.{difference.part} "
-                f"{difference.measure}; the first node that disagrees is {node!r} — "
+                f"{difference.measure}; the first node that disagrees is {node!r}{there} — "
                 f"the report is {staging / PARITY_FILE}"
             )
         _write_parity(staging, "passed", rows, tolerances)
@@ -210,20 +218,21 @@ class CompilePackage:
         result: str,
         records: List[Record],
         tolerances: Dict[str, Any],
-    ) -> Tuple[List[Dict[str, Any]], Optional[Tuple[int, Difference, str]]]:
+    ) -> Tuple[List[Dict[str, Any]], Optional[Tuple[int, Difference, str, List[Difference]]]]:
         """Every record through the Python graph and the artifact; the rows, and the first failure with its node."""
         runner = backend.runner(folder, files)
         entries = [port.entry for port in program.interface.outputs]
         entries = list(dict.fromkeys(entries + list(program.interface.produces)))
         rows: List[Dict[str, Any]] = []
-        failure: Optional[Tuple[int, Difference, str]] = None
+        failure: Optional[Tuple[int, Difference, str, List[Difference]]] = None
         for ordinal, record in enumerate(records, 1):
             reference = run_steps_multi(copy.deepcopy(record), list(steps), result)[0]
             produced = _join_outputs(program, runner(interface_arrays(program.interface, copy.deepcopy(record))))
             differences = compare(reference, produced, entries, tolerances)
             rows.append({"record": ordinal, "differences": [d.as_dict() for d in differences]})
             if differences and failure is None:
-                failure = (ordinal, differences[0], _bisect(program, steps, result, record, tolerances))
+                node, at_node = _bisect(program, steps, result, record, tolerances)
+                failure = (ordinal, differences[0], node, at_node)
         return rows, failure
 
     def _manifest(
@@ -285,16 +294,22 @@ def _join_outputs(program: Program, arrays: Dict[str, Any]) -> Record:
     return record
 
 
-def _bisect(program: Program, steps: Sequence[Any], result: str, record: Record, tolerances: Dict[str, Any]) -> str:
-    """The first node, in schedule order, whose eager torch outputs disagree with its Python op's on ``record``."""
+def _bisect(
+    program: Program, steps: Sequence[Any], result: str, record: Record, tolerances: Dict[str, Any]
+) -> Tuple[str, List[Difference]]:
+    """The first node, in schedule order, whose eager torch outputs disagree with its Python op's on ``record``,
+    judged by the same tolerances (an entry's own tolerance applies wherever that entry is written), with that
+    node's measured differences — what the parity report shows so the reader does not re-derive the gap."""
     tracer = Tracer(FlowGraph(flow=list(steps), outputs=result), where="parity", copy_snapshots=True)
     tracer.run(copy.deepcopy(record))
     eager = program.eager(copy.deepcopy(record))
     for node in program.graph.op_nodes():
         reference = {entry: tracer.value(node.name, entry, "output") for entry in node.writes}
-        if compare(reference, eager.get(node.name, {}), list(node.writes), tolerances):
-            return node.name
-    return program.graph.op_nodes()[-1].name if program.graph.op_nodes() else ""
+        differences = compare(reference, eager.get(node.name, {}), list(node.writes), tolerances)
+        if differences:
+            return node.name, differences
+    nodes = program.graph.op_nodes()
+    return (nodes[-1].name if nodes else ""), []
 
 
 def _write_parity(

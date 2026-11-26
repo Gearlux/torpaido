@@ -12,11 +12,12 @@ One config run, `runnable: !class:torpaido.CompilePackage`, writes a STANDALONE 
 one op. Five passes: `matrainer.model_package.load_package_graph` → `frontend.graph_from_steps`
 (subgraphs inlined) → `dataflow.measure` (reads/writes measured by ablation on the sample records,
 then `Graph.prune_sidecars`) → `program.build_program` (one `torch.export` program from the
-registered lowerings) → a backend (`backends.TorchScript`, `backends.TorchExport`) plus
-`parity.compare` with a per-node bisect. Torpaido ships recordstream's op lowerings
-(`lowering/recordstream.py`); a domain package ships its own behind a `[compile]` extra and the
-entry-point group `torpaido.lowerings`. Not built: ONNX and the other backends, any domain lowering,
+registered lowerings) → a backend (`backends.TorchScript`, `backends.TorchExport`, `backends.Onnx`
+behind the `[onnx]` extra) plus `parity.compare` with a per-node bisect. Torpaido ships recordstream's
+op lowerings (`lowering/recordstream.py`); a domain package ships its own behind a `[compile]` extra
+and the entry-point group `torpaido.lowerings`. Not built: the other backends, any domain lowering,
 runtime branches, a draw's refusal by name — `TASKS.md`.
+On PyPI as pre-release `0.1.0aN`, released by tag from the public repo `Gearlux/torpaido`.
 
 ## Rules
 
@@ -54,10 +55,16 @@ runtime branches, a draw's refusal by name — `TASKS.md`.
 - **A lowering is ONE function per op class**, `(op, reads, ctx) -> writes`, registered with
   `@lowers(OpClass)` by EXACT class (a subclass inherits nothing), found by `lowering_for`, discovered
   by `discover()` (torpaido's own module, then the entry-point group `torpaido.lowerings` through
-  confluid's `load_configurables`). A class has exactly one. §4.
+  confluid's `load_configurables`). A class has exactly one. §4. **`discover()` keeps what the group gave**
+  (`DISCOVERED`: entry name → module, or the exception its import raised), and a held object without a
+  model lowering is refused through `no_model_lowering(held, where)`: the modules found, the entries that
+  failed to import, and — when none comes from the package defining the object — the reinstall (2026-10-13:
+  a package installed before it declared its entry point looked like a lowering never written). A domain's
+  refusal for a held model calls it; never write the bare "has no model lowering" line.
   (`tests/test_lowering.py::test_a_lowering_is_found_by_the_exact_op_class`,
   `::test_registering_a_second_lowering_for_a_class_is_refused`,
-  `::test_discover_imports_the_entry_point_group_and_torpaido_s_own_lowerings`)
+  `::test_discover_imports_the_entry_point_group_and_torpaido_s_own_lowerings`,
+  `::test_a_missing_model_lowering_s_refusal_says_what_was_found_and_what_to_do`)
 - A surviving node without a lowering is refused at its `file:line:col`, naming what it writes and
   how to register one; a pruned node needs none. A lowering's writes must equal the op's measured
   writes. A lowering needing a constant calls `ctx.constant`, which refuses a varying value naming
@@ -88,20 +95,74 @@ runtime branches, a draw's refusal by name — `TASKS.md`.
   travel INSIDE the artifact. Backends are `@configurable(category="compiler_backend")`;
   `backend_named` resolves a manifest's `backend:`. §6.
   (`tests/test_program.py::test_a_backend_reproduces_the_python_graph_on_a_picture_of_another_size`)
-- **The envelope decides what is fixed.** `<entry>.<part>: varies` = every dimension dynamic (a data
-  part) or a 0-d input tensor (a scalar); a value = fixed and `specialized`; unnamed = fixed at the
-  samples' value (they must agree) — except a tensor dimension the samples disagree on, which is
-  dynamic. An envelope key naming no input part is refused listing them. Output dimensions are
-  measured over the samples; output facts and constant parts land under `constants`. §7.
-  (`tests/test_program.py::test_the_interface_lists_the_tensor_ports_and_specializes_the_rest`,
-  `::test_a_fixed_input_must_agree_across_the_samples`,
-  `::test_an_envelope_naming_no_input_part_is_refused_listing_them`)
+- **The interface is what the lowerings READ, measured; the envelope decides what is fixed among it**
+  (2026-10-13, user decision A). A probe forward on the first sample hands every input entry's parts
+  and facts to the lowerings as `Watched` mappings (`lowering.items`; a read, a `get`, a walk or a
+  `dict()` copy — `ItemValue.replace` — counts, `in` does not), and `_input_specs` keeps only what was
+  seen: a field no lowering looked at (a capture's derived `duration`, its SNR fields) is neither an
+  input nor `specialized`, and samples may differ there. Among the read parts: `<entry>.<part>: varies`
+  = every dimension dynamic (a data part) or a 0-d input tensor (a scalar); a value = fixed and
+  `specialized`, every sample checked; unnamed = what the samples do — shared → fixed, disagreeing →
+  dynamic (a scalar as a 0-d input, as a tensor dimension already was). A read FACT must be shared.
+  An envelope key naming no input part is refused listing them; one naming an unread part is refused
+  listing what is read. Output dimensions are measured over the samples; output facts and constant
+  parts land under `constants`. Never demand agreement on a field nobody reads, and never make an
+  unread field an input. §7.
+  (`tests/test_program.py::test_an_input_field_no_step_reads_is_not_part_of_the_interface`,
+  `::test_a_read_scalar_the_samples_disagree_on_varies_without_being_named`,
+  `::test_a_read_scalar_the_samples_disagree_on_is_an_input_and_a_read_fact_is_refused`,
+  `::test_an_envelope_value_still_refuses_a_sample_that_disagrees_with_it`,
+  `::test_an_envelope_naming_a_field_no_step_reads_is_refused_listing_what_is_read`)
 - **Parity decides the compile.** Every sample record through the Python graph (`run_steps_multi`)
-  and the artifact; `parity.compare` per entry and part (arrays within `atol`/`rtol`, integers and
-  facts exact; a per-entry tolerance wins). A failure leaves `<name>.partial/` with `parity.yaml`,
-  names the FIRST node whose eager torch outputs disagree with its op's (the bisect), and the
-  compiled folder is never moved into place. §8.
-  (`tests/test_parity.py::test_a_wrong_lowering_fails_the_compile_and_names_the_first_disagreeing_node`)
+  and the artifact; `parity.compare` per entry by its item rule — part by part (arrays within
+  `atol`/`rtol`, integers by whole steps, facts exact; a per-entry tolerance wins), or the rule's own
+  `ItemRule.compare(expected, actual, tolerances)` when it returns a list (a set of boxes matched by
+  overlap and label, never row by row — a model's row order is its ranking), the entry's tolerance
+  mapping handed to it with the `atol`/`rtol` defaults merged in. A failure leaves `<name>.partial/`
+  with `parity.yaml`, names the FIRST node whose eager torch outputs disagree with its op's (the
+  bisect, judged by the same tolerances) and that node's measured gaps (`first_node_differences`, also
+  in the error's text), and the compiled folder is never moved into place. §8.
+  (`tests/test_parity.py::test_a_wrong_lowering_fails_the_compile_and_names_the_first_disagreeing_node`,
+  `::test_a_rule_s_own_comparison_wins_over_the_part_by_part_one`)
+- **The TorchScript file is a trace of the LOWERED module, never of the exported one** (2026-10-13):
+  `torch.export` turns a size a lowering reads off a tensor (a picture as tall as its raster, resized
+  to a fixed width) into a `sym_size.int` node, and `torch.jit.trace` bakes that node's int to the
+  trace sample's value — the artifact then resized every record to the first sample's height
+  (measured: 40 rows in, 30 out, every piece plan the sample's). `backends.TorchScript.compile`
+  traces `program.module` (eager: the same size is an `aten::size` the trace keeps dynamic); the
+  exported program still validates the lowering under the envelope and is what `TorchExport` saves.
+  A lowering still reads a size off a tensor (`_extent`-style), never from Python arithmetic on a
+  shape, so eager and export agree.
+  (`tests/test_convert_to_image.py::test_an_artifact_keeps_a_raster_following_height_dynamic`)
+- **The ONNX file's ports are the graph's own names** (2026-10-15): `backends.Onnx` exports `program.exported`
+  with `torch.onnx.export(dynamo=True)` under the port names — one `model.onnx`, the weights inline, `onnx.checker`'s
+  full check before it is kept, onnxruntime's CPU session as the runner; no interface file. The exported program's
+  `sym_size` becomes a `Shape` node, so a raster-following height stays dynamic there too (the same test, over both
+  backends). An `opset_version` below `ONNX_OPSET_FLOOR` (18: asked for 17, the exporter wrote 18) is refused, never
+  raised silently. The `[onnx]` extra's packages are checked with `find_spec` BEFORE any import and a missing one is
+  refused naming the extra (`pip install torpaido[onnx]`) — never a `ModuleNotFoundError` from inside torch. `dev`
+  carries the extra so the workspace venv and the generated CI run the ONNX tests, which skip without it
+  (`conftest.needs_onnx`). The exporter's loggers (`onnxscript`, `onnx_ir`) are held to ERROR during the export: their
+  INFO and WARNING lines narrate its own passes ("Skipping constant folding for op Split"), nothing an operator acts on.
+  (`tests/test_onnx.py`, `tests/test_program.py::test_a_backend_reproduces_the_python_graph_on_a_picture_of_another_size`)
+- **ONNX has no complex tensors: a complex port is REAL PAIRS in the file, complex in the manifest** (2026-10-15):
+  `Onnx.compile` re-exports the lowered module behind an adapter (a complex input a `float32 [..., 2]` tensor turned
+  complex by `view_as_complex` before the graph, a complex output a pair after it), names those ports in the model's
+  metadata (`COMPLEX_PORTS_KEY`), and `_OnnxRunner` converts both ways (`_pairs` / `_complex`); `compiled.yaml` keeps
+  `complex64 [null]`. A 0-d input is fed 0-d (`np.asarray(x, order="C")`, never `ascontiguousarray`: it makes `[1]`,
+  and every scalar derived from it came back a list — measured on a real package's `time_end_s`). `aten.sort.stable`
+  (a detector library's ranking) is written as ONNX's sort through the exporter's `custom_translation_table`
+  (onnxscript's `aten_sort`): a tie's order is the runtime's, which the set comparison tolerates. A lowering that must
+  export to ONNX keeps its complex arithmetic to what the exporter translates (the FFT, a slice, a concatenation, the
+  magnitude) and frames, windows and reads sizes on the real view — a domain's rule, pinned in its own suite.
+  (`tests/test_onnx.py::test_a_complex_port_is_carried_as_real_pairs_and_comes_back_complex`,
+  `::test_a_scalar_output_derived_from_a_scalar_input_keeps_its_shape`, `::test_a_stable_sort_exports_as_onnx_s_sort`)
+- **An op the exporter cannot translate is refused naming the STEP** (2026-10-15): `LoweredGraph.forward` runs every
+  lowering under `fx_traceback.annotate({STEP_ANNOTATION: step})`, the ONNX backend exports under
+  `preserve_node_meta()` so every node carries its step, and `_untranslatable` turns the exporter's conversion error
+  into `torpaido: the onnx backend cannot translate <op>[ on a complex value] in step '<step>' (<op class>) — written
+  by <lowering> (<file>:<line>)`. The export's own stack trace stops at `forward`, so never locate by it.
+  (`tests/test_onnx.py::test_an_op_the_exporter_cannot_translate_is_refused_naming_the_step_and_the_lowering_s_line`)
 - **The compiled folder is STANDALONE** (user ruling 2026-10-13): `class_names.json` is copied in,
   the manifest names the package only as provenance (`source.package`, `source.package_sha256`), and
   `CompiledPackage(path=<compiled folder>)` runs it after the package is gone. Default location
@@ -122,10 +183,22 @@ runtime branches, a draw's refusal by name — `TASKS.md`.
 - `torch` is imported only in `lowering/context.py`, `lowering/recordstream.py`, `program.py`,
   `backends/` and a backend's runner; `torpaido/__init__.py` reaches `CompilePackage` /
   `CompiledPackage` lazily (PEP 562) and the IR, front end and dataflow pass import no framework.
-  `pyproject.toml` declares torch under `[torch]`, named by `[tool.aisland] frameworks`.
+  `pyproject.toml` declares torch under `[torch]`, offered for aisland's `framework` selection (`[tool.aisland.selection.framework]`).
 - `compiled.yaml` is format 1 and carries the generator header; a field a reader may ignore is
   added freely, a field that changes meaning bumps `COMPILED_FORMAT`; the op refuses another format.
   (`tests/test_compile_package.py::test_the_manifest_carries_the_generator_header`,
   `::test_a_compiled_package_of_another_format_is_refused`)
 - Tests run from inside `torpaido/`; a Python snippet that imports workspace packages runs from a
   directory that is NOT the workspace root (the project folders shadow the packages there).
+
+## Packaging and release
+
+- Releases go through the hand-written `release.yml` (never generated): the tag must match `pyproject.toml`, the wheel
+  is smoke-tested in a clean venv (no framework on `import torpaido`, the entry points listed, the configs shipped,
+  `__version__` the tag's), every extra must resolve from PyPI, and PyPI Trusted Publishing uploads it. An extra names
+  only a PyPI package.
+- Each release raises every workspace floor, core and extras, to the newest release and runs the suite there, and a
+  dependent's next release raises its `torpaido>=` the same way (user choice 2026-11-26).
+- The metadata a PyPI page needs, the `Development Status` classifier matching the version, the newest CHANGELOG
+  entry being the version, `CHANGELOG.md` in the sdist (`MANIFEST.in`) and the README's links being absolute GitHub
+  URLs (PyPI resolves no relative link) are pinned by `tests/test_packaging.py`.

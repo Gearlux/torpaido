@@ -2,7 +2,7 @@
 
 **Torpaido** compiles a **model package** — a model's inference graph, its weights and its class names
 in one folder, as the experiment-tracking project writes it — into an artifact an inference engine runs
-without Python: TorchScript today, a `torch.export` program, ONNX next.
+without Python: TorchScript, a `torch.export` program, or ONNX.
 
 Built on `Confluid` (configuration), `Loggair` (logging), `RecordStream` (the record pipelines it
 compiles) and the model-package format of the experiment-tracking project.
@@ -76,7 +76,7 @@ parity: {records: 8, status: passed, report: parity.yaml}
 A deployment runtime reads `compiled.yaml` for the tensor names and dtypes and `class_names.json` for
 the labels (the artifact emits `int64` indices). No key is agreed by convention.
 
-Every knob, documented: [`config/compile.example.yaml`](config/compile.example.yaml).
+Every knob, documented: [`config/compile.example.yaml`](https://github.com/Gearlux/torpaido/blob/main/config/compile.example.yaml).
 
 ## Run the compiled folder
 
@@ -100,17 +100,21 @@ has 61440000.0 — compile with the envelope letting it vary (signal.samplerate:
 
 ## The envelope: what is fixed, what may vary
 
-`envelope:` names input parts as `<entry>.<part>`:
+The interface is what the lowered steps READ: the compiler runs the lowerings once on the first sample
+through a recording view of each input entry, and a field no step looked at — a capture's derived
+duration, its SNR fields, a source name — is neither an input nor fixed, whatever the samples say about
+it. For the fields that are read, `envelope:` names them as `<entry>.<part>`:
 
 | the envelope says | the artifact |
 | --- | --- |
 | `signal.data: varies` | every dimension of that tensor is dynamic |
 | `signal.samplerate: varies` | the scalar becomes an input tensor (0-d, `float64`) |
-| `signal.samplerate: 100e6` | fixed: baked in and written under `specialized:`; a record with another value is refused |
-| *(not named)* | fixed at the samples' value, which every sample must share — except a tensor dimension the samples **disagree** on, which is dynamic |
+| `signal.samplerate: 100e6` | fixed: baked in and written under `specialized:`; a sample or a record with another value is refused |
+| *(not named)* | what the samples do: a value they share is fixed and written under `specialized:`; a scalar or a tensor dimension they **disagree** on is dynamic |
 
-So nothing is silent: `compiled.yaml` says which sample rate, which layout, which band the artifact
-answers for. A step whose lowering needs a constant that the envelope lets vary is refused:
+A fact a step reads (a layout, a scaling name) is always fixed, so the samples must share it. Nothing is
+silent: `compiled.yaml` says which sample rate, which layout, which band the artifact answers for, and
+only that. A step whose lowering needs a constant that the envelope lets vary is refused:
 
 ```
 torpaido: step 'raster/spectrogram' (mydomain.processing.Spectrogram) needs 'fft_size' as a constant, but it
@@ -215,39 +219,77 @@ feeds the engine with `split` and writes the record back with `join` — so the 
 
 | backend | `backend:` | writes | runs with | extra |
 | --- | --- | --- | --- | --- |
-| `torpaido.backends.TorchScript` | `torchscript` | `model.pt` | `torch.jit.load` — the C++ runtimes that exist today | `[torch]` |
+| `torpaido.backends.TorchScript` | `torchscript` | `model.pt` — a trace of the lowered module, so a size read off a tensor (a picture as tall as its raster) stays dynamic | `torch.jit.load` — the C++ runtimes that exist today | `[torch]` |
 | `torpaido.backends.TorchExport` | `torch-export` | `program.pt2` | `torch.export.load` | `[torch]` |
+| `torpaido.backends.Onnx` | `onnx` | `model.onnx` — one file, the weights inline, checked by `onnx.checker`; the ports are the ONNX graph's own input and output names | onnxruntime, or any ONNX runtime | `[onnx]` |
 
 `torch.export` is the hub: one lowered program, every backend writes it out. The port names travel
 inside the artifact, so a runner built from the folder alone knows the input order.
 
-## Parity
+The ONNX backend has one setting, the opset the deployment runtime supports:
 
-Every sample record goes through the Python graph and the artifact; each output entry is compared part by
-part — arrays within `atol` / `rtol` (defaults `1e-5` / `1e-4`, per entry under `tolerances:`), integers
-and facts exactly. A failing compile leaves `compiled/<name>.partial/` with `parity.yaml` and names the
-first step whose lowering disagrees with its op:
+```yaml
+  backend: !class:torpaido.backends.Onnx {opset_version: 18}   # left out: the exporter's recommended opset (20)
+```
+
+The exporter writes opset 18 and up, so a lower `opset_version` is refused rather than silently raised.
+Without the `[onnx]` extra the backend refuses by name, at compile time and at run time:
 
 ```
-CompilePackage: parity failed on record 1: predictions.boxes max |a - b| = 0.0312 (atol 1e-05, rtol 0.0001);
-the first node that disagrees is 'raster/spectrogram' — the report is …/compiled/torchscript.partial/parity.yaml
+torpaido: the onnx backend needs onnxscript to write model.onnx — pip install torpaido[onnx]
+torpaido: the onnx backend needs onnxruntime to run model.onnx — pip install torpaido[onnx]
+torpaido: the onnx backend writes opset 18 and up; opset_version 17 cannot be met
+```
+
+ONNX has no complex tensors. A complex port (a capture's IQ samples) is carried as **real pairs** in the file:
+`compiled.yaml` keeps `signal.data: complex64 [null]`, the ONNX graph's input is `signal.data float32 [N, 2]` with I
+and Q as the last dimension, and the compiled op converts both ways, so a flow sees the record's complex arrays only.
+A runtime feeding the file directly interleaves I and Q last. A stable sort (a detector library's ranking) is written
+as ONNX's sort, whose tie order is the runtime's; a region set is compared as a set, so a tie's order never fails
+parity. An op the exporter cannot translate is refused naming it, the step and the lowering that wrote it:
+
+```
+torpaido: the onnx backend cannot translate aten.unfold.default on a complex value in step 'raster/spectrogram' (mydomain.processing.Spectrogram) — written by lower_spectrogram (mydomain/lowering/torch.py:106)
+```
+
+A lowering that must export to ONNX keeps its complex arithmetic to what the exporter translates on complex values
+(the FFT, a slice, a concatenation, the magnitude) and frames, windows and reads sizes on the real view of the samples
+(`torch.view_as_real`).
+
+## Parity
+
+Every sample record goes through the Python graph and the artifact; each output entry is compared by its
+item rule — part by part, arrays within `atol` / `rtol` (defaults `1e-5` / `1e-4`, per entry under
+`tolerances:`), integers and facts exactly — or the rule's own way when its rows have no order of their own
+(a box set matched by overlap and label; the entry's tolerance mapping carries the rule's keys). A failing
+compile leaves `compiled/<name>.partial/` with `parity.yaml` and names the first step whose lowering
+disagrees with its op, with the gap measured there:
+
+```
+CompilePackage: parity failed on record 1: predictions.boxes 2 of 7 expected and 1 of 6 compiled regions unmatched (IoU >= 0.9, same label; 0 allowed);
+the first node that disagrees is 'picture/image' (image.data max |a - b| = 1.0 (atol 1e-05, rtol 0.0001)) — the report is …/compiled/torchscript.partial/parity.yaml
 ```
 
 ## Installation
 
 ```bash
-pip install "torpaido[torch] @ git+https://github.com/Gearlux/torpaido.git@main"
+pip install "torpaido[torch]"
 ```
 
 The `[torch]` extra holds the lowering language and the torch backends; the core (the IR, the front
-end, the dataflow pass) needs no framework.
+end, the dataflow pass) needs no framework. The `[onnx]` extra (`onnx`, `onnxruntime`, `onnxscript`)
+adds the ONNX backend:
+
+```bash
+pip install "torpaido[torch,onnx]"
+```
 
 ## Architecture
 
 The decisions behind each mechanism — measured dataflow, the lowering registry, the item rules, the
-`torch.export` hub, the envelope, parity — are recorded in [`docs/architecture.md`](docs/architecture.md);
-the user guide is [`docs/compiling.md`](docs/compiling.md).
+`torch.export` hub, the envelope, parity — are recorded in [`docs/architecture.md`](https://github.com/Gearlux/torpaido/blob/main/docs/architecture.md);
+the user guide is [`docs/compiling.md`](https://github.com/Gearlux/torpaido/blob/main/docs/compiling.md).
 
 ## License
 
-MIT
+[PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0) (the `LICENSE` file): free for personal, academic and other noncommercial use. Commercial use needs a separate licence from the author.

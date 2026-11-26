@@ -220,6 +220,10 @@ varying value naming the input it depends on.
 * A pruned node needs no lowering — the training-only steps of a package never do.
 * The function runs twice per compile (eagerly, then under `torch.export`), so everything it registers
   is keyed by name through the context.
+* Discovery keeps its evidence: `discover()` records what the entry-point group gave (`DISCOVERED`, each
+  entry's module or the exception its import raised), and a held object without a lowering is refused
+  with that list — a lowering that exists but is not registered (a package installed before it declared
+  its entry point) must not look like one never written (2026-10-13).
 
 ### Example
 
@@ -257,12 +261,22 @@ number; string); `@lowers_item(Type)` registers an override. The SAME rule deriv
 interface at compile time, feeds the engine in `CompiledPackage` (`split`) and writes the record back
 (`join`). Labels are `int64` indices; the vocabulary is `class_names.json`, copied into the folder.
 
+The rule also owns how two items of its type are judged EQUAL for parity: by default part by part (what
+`split` gives), or by its own `compare(expected, actual, tolerances)` when the parts' order carries no
+meaning — a detector's rows are ordered by its ranking, and two scores a hair apart swap places on a
+picture one grey level different, so a row-by-row compare fails a correct artifact (measured 2026-10-13: a
+compiled picture differs from numpy's by one level on 13 % of its pixels after the resize and quantization).
+`parity.compare` hands such a rule the entry's own tolerance mapping (`predictions: {iou: 0.9}`), the
+`atol` / `rtol` defaults merged in, and records what it returns as the entry's differences.
+
 ### Consequences
 
 * The manifest's `inputs:` / `outputs:` are `<entry>.<part>` ports with dtype, shape and item type; a
   deployment runtime reads names, never conventions.
 * A non-numeric list (a list of strings) is a fact and must be constant across the samples; a domain
   whose item needs another split registers a rule (a region set as one `[N, 4]` tensor).
+* A domain's notion of "the same set" lives in its rule, beside its split, not in a tolerance table in
+  the compiler: the compiler never learns what a box is.
 
 ### Example
 
@@ -270,12 +284,24 @@ interface at compile time, feeds the engine in `CompiledPackage` (`split`) and w
 parts, facts = item_rule(Image).split(image)      # {"data": <uint8 HWC>}, {"layout": "HWC"}
 item_rule(Label).split(Label(3))                  # {"value": 3}, {"classes": None}
 item_rule(Image).join({"data": array}, {"layout": "HWC"})
+
+
+@lowers_item(BoxSet)
+class BoxSetRule(ItemRule):
+    def split(self, item): ...
+    def join(self, parts, facts): ...
+
+    def compare(self, expected, actual, tolerances):   # a set: rows matched by overlap and label
+        floor = tolerances.get("iou", 0.99)
+        unmatched = [row for row in expected.rows if not any(iou(row, other) >= floor for other in actual.rows)]
+        return [("boxes", f"{len(unmatched)} rows unmatched")] if unmatched else []
 ```
 
 ### What you may change
 
 Add introspected kinds (a `PIL` image, a `pathlib.Path` fact) and domain rules; never a second
-conversion path beside `split` / `join`.
+conversion path beside `split` / `join`, and never a comparison table in the compiler that knows an
+item type by name — a rule's `compare` is where that knowledge goes.
 
 ---
 
@@ -292,9 +318,18 @@ baked into its interfaces, and a failure anywhere surfaced as a TorchScript erro
 order, nodes in schedule order, each lowering run with the values it reads, outputs flattened to tensors),
 runs it eagerly on the first sample (modules and buffers register, writes are checked, per-node outputs
 kept for the bisect), and exports it with `torch.export` under the dynamic shapes the envelope states.
-A `Backend` takes the `Program` and writes files (`TorchScript`: `torch.jit.trace` of the exported
-module → `model.pt`; `TorchExport`: `torch.export.save` → `program.pt2`) and gives a `Runner` from the
-folder alone: the port names travel inside the artifact as an extra file. Backends are
+A `Backend` takes the `Program` and writes files (`TorchScript`: `torch.jit.trace` of the LOWERED
+module → `model.pt`; `TorchExport`: `torch.export.save` → `program.pt2`; `Onnx`:
+`torch.onnx.export(program.exported, dynamo=True)` → `model.onnx`, run by onnxruntime, added 2026-10-15) and
+gives a `Runner` from the folder alone: the port names travel inside the artifact — an extra file of the
+torch forms, the ONNX graph's own input and output names. The TorchScript trace is of the
+eager lowered module, not of the exported program's module (changed 2026-10-13): export turns a size a
+lowering reads off a tensor — a picture as tall as its raster, resized to a fixed width — into a
+`sym_size.int` node, and `torch.jit.trace` bakes that node's int to the trace sample's value, so the
+artifact resized every record to the first sample's height (measured: 40 rows in, 30 out) while the
+eager trace keeps the same size as an `aten::size`. The exported program still validates every lowering
+under the envelope and is what `TorchExport` saves — the hub stays; TorchScript's file is traced beside
+it. Backends are
 `@configurable(category="compiler_backend")`; `backend_named` resolves a manifest's `backend:`.
 TorchScript came first (user decision D4) because the deployment runtime that exists loads it.
 
@@ -303,7 +338,39 @@ TorchScript came first (user decision D4) because the deployment runtime that ex
 * One lowering language, N artifacts; a backend never sees a lowering or a record.
 * TorchScript is in maintenance upstream; its API warnings are silenced inside the backend, where the
   user's choice of it is explicit.
-* An ONNX backend is `torch.onnx.export(program, dynamo=True)` on the same `Program` (`TASKS.md`).
+* The ONNX backend costs no second lowering: the same exported program, under the port names, is one
+  `model.onnx` (the weights inline, `onnx.checker`'s full check, opset 18 and up — a lower `opset_version`
+  is refused rather than raised silently, since the exporter wrote 18 when asked for 17). The exported
+  program's `sym_size` becomes a `Shape` node, so a raster-following height stays dynamic there too
+  (measured 2026-10-15: 30, 34, 40 and 7 rows in and out). A dimension `varies` freed and export then fixed
+  (a channel count a convolution needs) is written under the exporter's name for it (`[s95, s85, "3"]`), not
+  as a size; the manifest stays the contract. The `[onnx]` extra's packages are checked by name before any
+  import, so a missing one is a refusal naming `torpaido[onnx]`, never a `ModuleNotFoundError` from inside
+  torch.
+* **ONNX has no complex tensors, so the ONNX file is the lowered module behind a real-pair adapter**
+  (2026-10-15): a complex port enters the adapter as a `float32 [..., 2]` tensor (I then Q) and is turned
+  complex before the lowered graph, a complex output leaves as a pair, the model's metadata names those ports
+  and the runner converts both ways — `compiled.yaml` keeps `complex64`, a flow sees the record's complex
+  arrays. The adapter is re-exported under the interface's dynamic shapes (one path for every program) and
+  handed to the exporter; the exporter refused a complex graph input outright (`aten.sym_size.int ... no
+  decompositions registered for the complex-valued input`, measured on the signal-detection package). The
+  exporter translates a handful of ops on a complex value (the FFT, a slice, a concatenation, the magnitude,
+  an element-wise product) and not a framing, a mask or a size read, which is the domain lowering's business:
+  the spectrogram frames on the real view and turns complex at the FFT. A stable sort (`aten.sort.stable`, a
+  detector library's ranking) has no translation of the exporter's own and is written as ONNX's sort (TopK)
+  through the exporter's translation table; a tie's order is then the runtime's, which the set comparison of
+  a region set tolerates by design. A 0-d input is fed 0-d (`np.ascontiguousarray` made it `[1]`, and every
+  scalar derived from it came back as a one-element list — measured on a real package's `time_end_s`).
+  Measured on the signal-detection package (an RF-DETR segmenter on 1024 x 1024 pictures): a 26 s compile of
+  which the export is 5 s, one 126 MB file, onnxruntime 0.06-0.13 s a capture against 0.16-0.18 s eager torch,
+  parity on four captures without a difference under the shipped tolerances.
+* **A refusal of an op the exporter cannot translate is located by the STEP** (2026-10-15): `LoweredGraph.forward`
+  runs every lowering under `fx_traceback.annotate({STEP_ANNOTATION: step})`, so every fx node of a program
+  exported under `preserve_node_meta()` names the step whose lowering wrote it — the export's own stack trace
+  stops at the lowered graph's `forward` line and never reaches the lowering. The ONNX backend parses the
+  exporter's conversion error for the node, reads the step off it, and refuses naming the op, whether its value
+  was complex, the step, its op class and where the lowering is defined — instead of the exporter's forty
+  lines.
 
 ### Example
 
@@ -312,6 +379,8 @@ program = build_program(graph, samples, envelope={"image.data": "varies"})
 files = TorchScript().compile(program, folder)          # [folder / "model.pt"]
 runner = TorchScript().runner(folder, ["model.pt"])     # knows the port order from the artifact
 runner({"image.data": array})                           # {"scores.data": ..., "label.value": ...}
+Onnx(opset_version=18).compile(program, folder)         # [folder / "model.onnx"]: the ports are the graph's own names
+# compiled.yaml: inputs: {input.data: {dtype: complex64, shape: [null]}}   the ONNX input: input.data float32 [N, 2]
 ```
 
 ### What you may change
@@ -321,40 +390,64 @@ runtime wants positional tensors).
 
 ---
 
-## 7. The envelope fixes or frees input parts, and the manifest states what was fixed (`torpaido.program`, 2026-10-13)
+## 7. The interface is what the lowerings read; the envelope fixes or frees among it, and the manifest states what was fixed (`torpaido.program`, 2026-10-13)
 
 ### Context
 
 A graph may resolve a setting per record (an FFT length from the sample rate); an exported program cannot.
-The reference compiler read such values from its side channel at run time, or baked them silently.
+The reference compiler read such values from its side channel at run time, or baked them silently. A
+domain's capture item also carries fields derived from the samples (a duration, SNR measurements, a
+modulation name) that no step of the inference graph reads; a first version of this compiler made every
+field of an input entry a port and demanded the samples agree on each — a compile of a real package
+stopped on two captures 24.9 ms and 21.2 ms long, over a `duration` nothing read (user decision A,
+2026-10-13: measure the reads, and let a read scalar the samples disagree on vary).
 
 ### Decision
 
-`envelope: {<entry>.<part>: varies | value}`. `varies` makes every dimension of a data part dynamic
+The interface is MEASURED: a probe forward on the first sample hands every input entry's parts and facts
+to the lowerings through recording mappings (`Watched`: a read, a `get`, a walk or a `dict()` copy counts,
+`in` does not), and only what some lowering looked at enters the interface. Among that,
+`envelope: {<entry>.<part>: varies | value}`: `varies` makes every dimension of a data part dynamic
 (`Dim.AUTO`) or a scalar part a 0-d input tensor; a value fixes the part, checked against every sample
-and written under `specialized`; an unnamed part is fixed at the samples' value, which every sample must
-share — except a tensor dimension the samples disagree on, which is dynamic (measured). Output
-dimensions are measured over the samples; output facts and constant parts land under `constants`.
-A lowering that needs a constant from a varying part is refused naming the dependency and the two fixes.
+and written under `specialized`; an unnamed part follows the samples — a value they share is fixed and
+stated, a scalar or a tensor dimension they disagree on is dynamic. A read fact (a layout, a scaling) is
+always fixed and the samples must share it. Output dimensions are measured over the samples; output facts
+and constant parts land under `constants`. A lowering that needs a constant from a varying part is refused
+naming the dependency and the two fixes.
 
 ### Consequences
 
-* Nothing is specialized silently: `compiled.yaml` says which sample rate, layout and band the artifact
-  answers for, and `CompiledPackage` refuses a record outside it.
+* The manifest states exactly what the artifact assumes and nothing more: a capture's unread fields
+  never appear, `CompiledPackage` never checks them, and samples may differ there.
+* Nothing read is specialized silently: `compiled.yaml` says which sample rate, layout and band the
+  artifact answers for, and `CompiledPackage` refuses a record outside it.
+* The envelope is for intent the samples cannot show: `varies` on a part the samples happen to share, or
+  a value to pin. An envelope key naming an unread part is refused listing what is read.
 * `varies` on a single sample's output cannot be observed as dynamic in the manifest (there is one
-  shape); give the compiler samples that differ.
+  shape); give the compiler samples that differ. The probe costs one extra lowering pass on the first
+  sample (one model call).
 
 ### Example
 
 ```yaml
-envelope: {signal.samplerate: 100e6, signal.data: varies}
-# compiled.yaml → inputs: {signal.data: {shape: [null], ...}}  specialized: {signal.samplerate: 100000000.0}
+# a Signal has data, samplerate, center_freq, duration, bandwidth, snr_db, …; the spectrogram lowering reads
+# data, samplerate and center_freq. Samples: two captures of different length, rate and centre.
+envelope: {input.data: varies}
+# compiled.yaml → inputs: {input.data: {shape: [null]}, input.samplerate: {shape: []}, input.center_freq: {shape: []}}
+#                 specialized: {}        — duration, bandwidth, snr_db … are nobody's business
+```
+
+```python
+reads["clip"].parts["rate"]          # seen: clip.rate enters the interface
+"rate" in reads["clip"].parts        # not a look
+clip.replace(data=scaled)            # a dict() copy: every part the item carries forward is seen
 ```
 
 ### What you may change
 
-A per-dimension spelling (`image.data: [varies, varies, 3]`) if a package needs it; the rule that an
-unnamed part is fixed and stated.
+A per-dimension spelling (`image.data: [varies, varies, 3]`) if a package needs it; the rule that a shared
+read value is fixed and stated. Never a declared list of "interface fields" per item type — the reads
+are measured, like the dataflow (record 2).
 
 ---
 
@@ -369,10 +462,12 @@ beside it that nobody read at deployment.
 ### Decision
 
 `CompilePackage` runs every sample record through the Python graph and the artifact and compares each
-output entry part by part (`parity.compare`: arrays within `atol`/`rtol`, integers and facts exactly, a
-per-entry tolerance winning). A failure writes `parity.yaml` into `<name>.partial/`, names the FIRST node
-whose eager torch outputs disagree with its op's Tracer snapshot (the bisect), and the folder is never
-moved into place. The folder is STANDALONE (user ruling D3, 2026-10-13): `compiled.yaml` (format 1,
+output entry by its item rule (`parity.compare`: part by part — arrays within `atol`/`rtol`, integers by
+whole steps, facts exactly, a per-entry tolerance winning — or the rule's own `compare`, record 5, for a
+set whose rows have no order). A failure writes `parity.yaml` into `<name>.partial/`, names the FIRST node
+whose eager torch outputs disagree with its op's Tracer snapshot (the bisect, judged by the same
+tolerances) together with that node's own measured gaps (`first_node_differences`, repeated in the
+error's text), and the folder is never moved into place. The folder is STANDALONE (user ruling D3, 2026-10-13): `compiled.yaml` (format 1,
 generator header), the backend's files, a copy of `class_names.json`, `parity.yaml`; the package is named
 only as provenance (`source.package`, `source.package_sha256`). `CompiledPackage(path=<folder>)` runs
 it after the package is gone, refusing a record outside the envelope by part and both values. The
@@ -383,14 +478,24 @@ weights).
 
 * A compile is a verified claim: what landed in the folder answered as the Python graph did on every
   sample record.
-* A domain item needing a tolerant comparison (boxes matched by IoU) registers it with its rule
-  (`TASKS.md`); the default is part-wise closeness.
+* A domain item needing a tolerant comparison (boxes matched by IoU) carries it in its rule's `compare`
+  (record 5); the default is part-wise closeness. The compiler never learns an item type by name.
+* The report says where AND by how much: the first disagreeing node's gap is in `parity.yaml` and in
+  the error, so a lowering is fixed from the report, not re-measured.
 
 ### Example
 
 ```
 CompilePackage: parity failed on record 1: scores.data max |a - b| = 139.4 (atol 1e-05, rtol 0.0001);
-the first node that disagrees is 'pre/bright' — the report is …/compiled/ts.partial/parity.yaml
+the first node that disagrees is 'pre/bright' (image.data max |a - b| = 139.4 (atol 1e-05, rtol 0.0001)) — the report is …/compiled/ts.partial/parity.yaml
+```
+
+```yaml
+# parity.yaml of that failure
+status: failed
+first_disagreeing_node: pre/bright
+first_node_differences:
+- {entry: image, part: data, measure: 'max |a - b| = 139.4 (atol 1e-05, rtol 0.0001)'}
 ```
 
 ### What you may change

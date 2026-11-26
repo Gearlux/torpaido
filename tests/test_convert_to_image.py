@@ -4,10 +4,12 @@ from typing import Any, Dict, List
 
 import numpy as np
 import pytest
+from conftest import needs_onnx
 from recordstream import Image, Record
 from recordstream.flow import parse_flow, run_steps_multi
 from recordstream.ops.image import ConvertToImage
 
+from torpaido.backends import Onnx, TorchScript
 from torpaido.dataflow import measure
 from torpaido.parity import compare
 from torpaido.program import build_program
@@ -75,3 +77,27 @@ def test_another_colormap_is_refused_by_name() -> None:
         ValueError, match=r"step 'picture' \(ConvertToImage\) uses the colormap 'viridis', which is not lowered yet"
     ):
         build_program(graph, records)
+
+
+@pytest.mark.parametrize("backend", [TorchScript(), pytest.param(Onnx(), marks=needs_onnx)])
+def test_an_artifact_keeps_a_raster_following_height_dynamic(tmp_path: Any, backend: Any) -> None:
+    """A picture as tall as its raster (``height=None``) resized to a fixed width: under ``torch.export`` the target
+    height is a ``sym_size`` node, which a trace of the EXPORTED module bakes to the sample's (measured 2026-10-13: a
+    40-row record came out 30 rows). The TorchScript backend traces the lowered module, and the ONNX export keeps the
+    exported program's ``sym_size`` as a ``Shape`` node, so either artifact's picture is as tall as each record's
+    raster."""
+    from torpaido.program import interface_arrays
+
+    op = ConvertToImage(colormap="gray", field="map", width=50, height=None, vmin=-100.0, vmax=-20.0)
+    samples = _records(seed=1, shape=(30, 25)) + _records(seed=2, shape=(40, 25))
+    steps, result = parse_flow({"picture": {"op": op}}, "picture")
+    graph = measure(steps, result, samples)
+    graph.prune_sidecars()
+    program = build_program(graph, samples, envelope={"map.data": "varies"})
+    files = backend.compile(program, tmp_path)
+    runner = backend.runner(tmp_path, [path.name for path in files])
+
+    for rows in (30, 34, 40, 7):
+        (record,) = _records(seed=3, shape=(rows, 25))
+        produced = runner(interface_arrays(program.interface, record))["image.data"]
+        assert tuple(produced.shape) == (rows, 50, 3), f"{rows} rows in, {produced.shape} out"
