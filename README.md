@@ -76,7 +76,7 @@ parity: {records: 8, status: passed, report: parity.yaml}
 A deployment runtime reads `compiled.yaml` for the tensor names and dtypes and `class_names.json` for
 the labels (the artifact emits `int64` indices). No key is agreed by convention.
 
-Every knob, documented: [`config/compile.example.yaml`](config/compile.example.yaml).
+Every knob, documented: [`config/compile.example.yaml`](https://github.com/Gearlux/torpaido/blob/main/config/compile.example.yaml).
 
 ## Run the compiled folder
 
@@ -273,7 +273,7 @@ the first node that disagrees is 'picture/image' (image.data max |a - b| = 1.0 (
 ## Installation
 
 ```bash
-pip install "torpaido[torch] @ git+https://github.com/Gearlux/torpaido.git@main"
+pip install "torpaido[torch]"
 ```
 
 The `[torch]` extra holds the lowering language and the torch backends; the core (the IR, the front
@@ -281,15 +281,15 @@ end, the dataflow pass) needs no framework. The `[onnx]` extra (`onnx`, `onnxrun
 adds the ONNX backend:
 
 ```bash
-pip install "torpaido[torch,onnx] @ git+https://github.com/Gearlux/torpaido.git@main"
+pip install "torpaido[torch,onnx]"
 ```
 
 ## Architecture
 
 The decisions behind each mechanism — measured dataflow, the lowering registry, the item rules, the
-`torch.export` hub, the envelope, parity — are recorded in [`docs/architecture.md`](docs/architecture.md);
-the user guide is [`docs/compiling.md`](docs/compiling.md).
+`torch.export` hub, the envelope, parity — are recorded in [`docs/architecture.md`](https://github.com/Gearlux/torpaido/blob/main/docs/architecture.md);
+the user guide is [`docs/compiling.md`](https://github.com/Gearlux/torpaido/blob/main/docs/compiling.md).
 
 ## License
 
-MIT
+[PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0) (the `LICENSE` file): free for personal, academic and other noncommercial use. Commercial use needs a separate licence from the author.

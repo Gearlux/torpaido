@@ -1,17 +1,36 @@
 [project]
 name = "torpaido"
-version = "0.1.0"
+version = "0.1.0a1"
 description = "High-performance compilation and optimization engine for record pipelines and PyTorch models."
+readme = "README.md"
 authors = [{ name = "Taidal", email = "info@gearlux.ai" }]
+license = "PolyForm-Noncommercial-1.0.0"
+license-files = ["LICENSE"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Compilers",
+    "Typing :: Typed",
+]
+# Floors are what the suite runs against in a clean venv resolving from PyPI alone, and each release
+# raises every workspace floor to the newest release (user choice 2026-11-26). Measured 2026-11-26 at
+# confluid 0.5.0, loggair 0.3.0, recordstream 0.1.0a4 and matrainer 0.1.0a3:
+# the suite passed (122).
 dependencies = [
-    "confluid>=0.1.0",
-    "loggair>=0.1.0",
+    "confluid>=0.5.0",
+    "loggair>=0.3.0",
     # recordstream and matrainer ship as pre-releases (0.1.0aN). Under PEP 440 a plain `>=0.1.0`
     # EXCLUDES every pre-release of 0.1.0, so it would resolve to nothing.
-    "recordstream>=0.1.0a3",
+    "recordstream>=0.1.0a4",
     # The unit a compile takes is a matrainer MODEL PACKAGE (its graph, weights and class names);
     # matrainer's core is framework-free, so this costs no framework.
-    "matrainer>=0.1.0a2",
+    "matrainer>=0.1.0a3",
     # NOTE: no torch in the core. The IR (`ir.py`), the front end (`frontend.py`) and the dataflow
     # pass (`dataflow.py`) read recordstream's parsed FlowStep list and run its kernel — no framework.
     # The lowering language and the backends are torch: the `[torch]` extra below.
@@ -21,6 +40,12 @@ dependencies = [
     "typing-extensions",
 ]
 requires-python = ">=3.12"
+
+[project.urls]
+Homepage = "https://github.com/Gearlux/torpaido"
+Repository = "https://github.com/Gearlux/torpaido.git"
+Issues = "https://github.com/Gearlux/torpaido/issues"
+Changelog = "https://github.com/Gearlux/torpaido/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 # The lowering language (every lowering is a torch function), the `torch.export` hub and the
@@ -40,12 +65,15 @@ dev = [
     "flake8>=6.0.0,<8.0.0",
     "flake8-junit-report>=2.1.0",
     "mypy>=1.0.0,<2.0.0",
+    # The colormap refusal test measures ConvertToImage with `viridis`, which recordstream draws through matplotlib.
+    "matplotlib",
     "pytest>=7.0.0,<9.0.0",
     "pytest-cov>=4.0.0,<7.0.0",
 ]
 
 [build-system]
-requires = ["setuptools>=64", "wheel"]
+# >=77 for the PEP 639 `license` string + `license-files` above.
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
@@ -78,3 +106,8 @@ line_length = 120
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+
+[tool.mypy]
+# Untyped third-party packages (yaml, setuptools, onnxruntime) are not errors — the same rule the sibling projects and
+# the workspace-root run apply.
+disable_error_code = ["import-untyped"]

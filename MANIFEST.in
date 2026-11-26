@@ -1,0 +1,9 @@
+# What the sdist ships BEYOND what setuptools already infers.
+#
+# `readme = "README.md"` and `license-files = ["LICENSE"]` in pyproject already pull those
+# two in, and `packages.find` + `[tool.setuptools.package-data]` pull the package. A
+# CHANGELOG is referenced by nothing, so without this line it is silently absent from the
+# sdist.
+#
+# Pinned by tests/test_packaging.py::test_the_changelog_is_shipped_in_the_sdist
+include CHANGELOG.md

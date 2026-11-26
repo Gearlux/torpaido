@@ -17,6 +17,7 @@ behind the `[onnx]` extra) plus `parity.compare` with a per-node bisect. Torpaid
 op lowerings (`lowering/recordstream.py`); a domain package ships its own behind a `[compile]` extra
 and the entry-point group `torpaido.lowerings`. Not built: the other backends, any domain lowering,
 runtime branches, a draw's refusal by name — `TASKS.md`.
+On PyPI as pre-release `0.1.0aN`, released by tag from the public repo `Gearlux/torpaido`.
 
 ## Rules
 
@@ -189,3 +190,15 @@ runtime branches, a draw's refusal by name — `TASKS.md`.
   `::test_a_compiled_package_of_another_format_is_refused`)
 - Tests run from inside `torpaido/`; a Python snippet that imports workspace packages runs from a
   directory that is NOT the workspace root (the project folders shadow the packages there).
+
+## Packaging and release
+
+- Releases go through the hand-written `release.yml` (never generated): the tag must match `pyproject.toml`, the wheel
+  is smoke-tested in a clean venv (no framework on `import torpaido`, the entry points listed, the configs shipped,
+  `__version__` the tag's), every extra must resolve from PyPI, and PyPI Trusted Publishing uploads it. An extra names
+  only a PyPI package.
+- Each release raises every workspace floor, core and extras, to the newest release and runs the suite there, and a
+  dependent's next release raises its `torpaido>=` the same way (user choice 2026-11-26).
+- The metadata a PyPI page needs, the `Development Status` classifier matching the version, the newest CHANGELOG
+  entry being the version, `CHANGELOG.md` in the sdist (`MANIFEST.in`) and the README's links being absolute GitHub
+  URLs (PyPI resolves no relative link) are pinned by `tests/test_packaging.py`.
